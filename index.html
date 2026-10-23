@@ -108,6 +108,8 @@ textarea.input{padding:10px 12px;resize:vertical;min-height:0}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .unit-wrap{display:flex;align-items:center;gap:6px}
+.time-in{display:grid;grid-template-columns:minmax(0,0.8fr) auto minmax(0,1.2fr) auto;align-items:center;gap:8px}
+.time-in span{color:var(--muted);font-weight:600}
 .unit-wrap span{color:var(--muted);white-space:nowrap}
 .chipbox{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px;min-height:48px;border:1px solid var(--line);border-radius:8px;background:var(--field)}
 .code-chip{display:inline-flex;align-items:center;gap:2px;height:32px;padding:0 2px 0 10px;border-radius:16px;background:var(--red-soft);color:var(--red-ink);font-family:var(--num);font-size:18px;font-weight:700}
@@ -283,28 +285,40 @@ const EVENT_SEED = [
   { id: 'names_faces', name: 'Names & Faces', result_kind: 'count', ems_kind: null, sort_order: 1 },
   { id: 'binary', name: 'Binary', result_kind: 'count', ems_kind: 'binary', sort_order: 2 },
   { id: 'speed_number', name: 'Speed Number', result_kind: 'count', ems_kind: 'digits', sort_order: 3 },
-  { id: 'long_number', name: '15-min Number', result_kind: 'count', ems_kind: 'digits', sort_order: 4 },
+  { id: 'long_number', name: 'Long Numbers', result_kind: 'count', ems_kind: 'digits', sort_order: 4 },
   { id: 'spoken', name: 'Spoken Number', result_kind: 'count_at_interval', ems_kind: 'digits', sort_order: 5 },
   { id: 'speed_card', name: 'Speed Card', result_kind: 'time', ems_kind: 'cards', sort_order: 6 },
-  { id: 'long_card', name: '10-min Cards', result_kind: 'count', ems_kind: 'cards', sort_order: 7 },
+  { id: 'long_card', name: 'Long Cards', result_kind: 'count', ems_kind: 'cards', sort_order: 7 },
   { id: 'words', name: 'Words', result_kind: 'count', ems_kind: null, sort_order: 8 },
   { id: 'images', name: 'Images', result_kind: 'count', ems_kind: null, sort_order: 9 },
   { id: 'dates', name: 'Dates', result_kind: 'count', ems_kind: null, sort_order: 10 }
 ];
 // Standard formats: names/durations marked "confirm" are open item G1 in the design doc.
 const FORMAT_SEED = [
-  { event_id: 'names_faces', name: 'Standard', is_standard: true },
-  { event_id: 'binary', name: 'Standard', is_standard: true },
-  { event_id: 'speed_number', name: 'Standard', is_standard: true },
-  { event_id: 'long_number', name: '15-min standard', is_standard: true, mem_seconds: 900 },
+  { event_id: 'names_faces', name: '1 min', is_standard: true, mem_seconds: 60 },
+  { event_id: 'names_faces', name: '5 min', is_standard: true, mem_seconds: 300 },
+  { event_id: 'names_faces', name: '15 min', is_standard: true, mem_seconds: 900 },
+  { event_id: 'binary', name: '1 min', is_standard: true, mem_seconds: 60 },
+  { event_id: 'binary', name: '5 min', is_standard: true, mem_seconds: 300 },
+  { event_id: 'binary', name: '30 min', is_standard: true, mem_seconds: 1800 },
+  { event_id: 'speed_number', name: '1 min', is_standard: true, mem_seconds: 60 },
+  { event_id: 'speed_number', name: '5 min', is_standard: true, mem_seconds: 300 },
+  { event_id: 'long_number', name: '15 min', is_standard: true, mem_seconds: 900 },
+  { event_id: 'long_number', name: '30 min', is_standard: true, mem_seconds: 1800 },
+  { event_id: 'long_number', name: '60 min', is_standard: true, mem_seconds: 3600 },
   { event_id: 'spoken', name: 'Spoken – 1 s', is_standard: true, interval_seconds: 1 },
   { event_id: 'spoken', name: 'Spoken – 0.9 s', is_standard: true, interval_seconds: 0.9 },
   { event_id: 'spoken', name: 'Spoken – 0.8 s', is_standard: true, interval_seconds: 0.8 },
-  { event_id: 'speed_card', name: 'Standard – 52 cards', is_standard: true, item_count: 52, mem_seconds: 300 },
-  { event_id: 'long_card', name: '10-min standard', is_standard: true, mem_seconds: 600 },
-  { event_id: 'words', name: 'Standard', is_standard: true },
-  { event_id: 'images', name: 'Standard', is_standard: true },
-  { event_id: 'dates', name: 'Standard', is_standard: true }
+  { event_id: 'speed_card', name: '52 cards', is_standard: true, item_count: 52, mem_seconds: 300 },
+  { event_id: 'long_card', name: '10 min', is_standard: true, mem_seconds: 600 },
+  { event_id: 'long_card', name: '30 min', is_standard: true, mem_seconds: 1800 },
+  { event_id: 'long_card', name: '60 min', is_standard: true, mem_seconds: 3600 },
+  { event_id: 'words', name: '1 min', is_standard: true, mem_seconds: 60 },
+  { event_id: 'words', name: '5 min', is_standard: true, mem_seconds: 300 },
+  { event_id: 'words', name: '15 min', is_standard: true, mem_seconds: 900 },
+  { event_id: 'images', name: '1 min', is_standard: true, mem_seconds: 60 },
+  { event_id: 'images', name: '5 min', is_standard: true, mem_seconds: 300 },
+  { event_id: 'dates', name: '5 min', is_standard: true, mem_seconds: 300 }
 ];
 const UNIT = { names_faces: 'names', binary: 'digits', speed_number: 'digits', long_number: 'digits', spoken: 'digits', speed_card: 'cards', long_card: 'cards', words: 'words', images: 'images', dates: 'dates' };
 const EMS_FAMILIES = {
@@ -642,16 +656,15 @@ function canEdit(a) {
 }
 function myEms(family) { return state.ems.find((s) => familyOf(s.kind) === family) || null; }
 function formatsFor(eventId, includeId) {
-  const me = state.me?.id;
-  const adminIds = new Set(state.profiles.filter((p) => p.role === 'admin').map((p) => p.id));
-  return state.formats.filter((f) => f.event_id === eventId && (f.is_standard || f.created_by === me || adminIds.has(f.created_by) || f.id === includeId))
-    .sort((a, b) => (b.is_standard - a.is_standard) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+  // Log shows only the event's timed (standard) formats; an older format stays visible when editing an attempt that used it
+  return state.formats.filter((f) => f.event_id === eventId && (f.is_standard || f.id === includeId))
+    .sort((a, b) => (b.is_standard - a.is_standard) || (a.mem_seconds ?? 0) - (b.mem_seconds ?? 0) || (a.interval_seconds ?? 0) - (b.interval_seconds ?? 0) || a.name.localeCompare(b.name, undefined, { numeric: true }));
 }
 function lastFormatFor(athleteId, eventId) {
   const mine = attemptsOf(athleteId).filter((a) => a.event_id === eventId).sort((a, b) => (b.logged_at || '').localeCompare(a.logged_at || ''));
   if (mine.length && state.formatsById[mine[0].format_id]) return mine[0].format_id;
-  const std = state.formats.find((f) => f.event_id === eventId && f.is_standard);
-  return std ? std.id : (state.formats.find((f) => f.event_id === eventId) || {}).id;
+  const list = formatsFor(eventId);
+  return list.length ? list[0].id : (state.formats.find((f) => f.event_id === eventId) || {}).id;
 }
 function recentEventIds(athleteId) {
   const seen = []; const list = attemptsOf(athleteId).slice().sort((a, b) => (b.logged_at || '').localeCompare(a.logged_at || ''));
@@ -1538,7 +1551,7 @@ const ICONS = {
   photo: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3.5"/></svg>'
 };
 function tabbar(route) {
-  const tabs = [['today', 'Today'], ['log', 'Log'], ['progress', 'Progress'], ['trouble', 'Trouble'], ['boards', 'Boards']];
+  const tabs = [['today', 'Today'], ['progress', 'Progress'], ['log', 'Log'], ['trouble', 'Trouble'], ['boards', 'Boards']];
   const cur = route === 'drill' ? 'trouble' : route;
   return `<nav class="tabbar" aria-label="Main"><div class="inner">${tabs.map(([r, l]) => `<a href="#/${r}"${cur === r ? ' aria-current="page"' : ''}>${ICONS[r]}${l}</a>`).join('')}</div></nav>`;
 }
@@ -1681,7 +1694,7 @@ function viewToday() {
 function blankLog(eventId, keep = {}) {
   const fid = keep.formatId && state.formatsById[keep.formatId]?.event_id === eventId ? keep.formatId : lastFormatFor(state.me.id, eventId);
   const f = state.formatsById[fid] || {};
-  return { editingId: null, eventId, formatId: fid, date: keep.date || TODAY(), wrong: [], wrongErr: '', quick: '', correct: '', total: f.item_count ?? (kindOf(eventId) === 'time' ? 52 : ''), time: '', interval: f.interval_seconds ?? '', note: '', abandoned: false, file: null, err: '', newDrill: false };
+  return { editingId: null, eventId, formatId: fid, date: keep.date || TODAY(), wrong: [], wrongErr: '', correct: '', total: f.item_count ?? (kindOf(eventId) === 'time' ? 52 : ''), time: '', interval: f.interval_seconds ?? '', note: '', abandoned: false, file: null, err: '' };
 }
 function initLog(editId) {
   if (editId) {
@@ -1698,7 +1711,9 @@ function initLog(editId) {
 function syncLog() {
   const L = ui.log; if (!L) return;
   const v = (id) => { const el = document.getElementById(id); return el ? el.value : undefined; };
-  for (const [key, id] of [['quick', 'f-quick'], ['date', 'f-date'], ['correct', 'f-correct'], ['total', 'f-total'], ['time', 'f-time'], ['interval', 'f-interval'], ['note', 'f-note']]) { const x = v(id); if (x !== undefined) L[key] = x; }
+  for (const [key, id] of [['date', 'f-date'], ['correct', 'f-correct'], ['total', 'f-total'], ['interval', 'f-interval'], ['note', 'f-note']]) { const x = v(id); if (x !== undefined) L[key] = x; }
+  const tm = v('f-time-min'), ts = v('f-time-sec');
+  if (tm !== undefined || ts !== undefined) L.time = joinTime(tm, ts);
   const fmt = v('f-format'); if (fmt && fmt !== '__new') L.formatId = fmt;
   const ab = document.getElementById('f-abandoned'); if (ab) L.abandoned = ab.checked;
   const pf = document.getElementById('f-proof'); if (pf && pf.files && pf.files[0]) L.file = pf.files[0];
@@ -1711,20 +1726,24 @@ function viewLog() {
   const tiles = recentEventIds(state.me.id).map((id) => state.eventsById[id]).filter(Boolean)
     .map((e) => `<button type="button" class="tile" data-act="log-event" data-id="${e.id}" aria-pressed="${e.id === L.eventId}">${esc(e.name)}${e.id === eotwId ? '<span class="tile-tag">2× XP</span>' : ''}</button>`).join('');
   let fields = '';
+  const timeBox = (label, optional) => { const t = splitTime(L.time); return `<div class="field"><span class="label" id="time-label">${label}${optional ? ' <span class="muted" style="font-weight:400">(optional)</span>' : ''}</span>
+      <div class="time-in" role="group" aria-labelledby="time-label" aria-describedby="time-readout">
+        <input id="f-time-min" class="input big" inputmode="numeric" autocomplete="off" placeholder="0" aria-label="Minutes" value="${esc(t.min)}"><span>min</span>
+        <input id="f-time-sec" class="input big" inputmode="decimal" autocomplete="off" placeholder="${k === 'time' ? '35.7' : '00'}" aria-label="Seconds" value="${esc(t.sec)}"><span>sec</span></div>
+      <span class="hint" id="time-readout">${esc(timeReadout(t.min, t.sec))}</span></div>`; };
   if (k === 'time') {
-    fields = `<div class="grid2">
-      <div class="field"><label for="f-time">Time</label><div class="unit-wrap"><input id="f-time" class="input big" inputmode="decimal" autocomplete="off" placeholder="35.7" value="${esc(L.time)}"></div><span class="hint">Seconds, or 1:04</span></div>
-      <div class="field"><label for="f-correct">Cards correct</label><div class="unit-wrap"><input id="f-correct" class="input big" inputmode="numeric" placeholder="52" value="${esc(L.correct)}"><span>of</span><input id="f-total" class="input big" inputmode="numeric" aria-label="Total cards" style="max-width:72px" value="${esc(L.total)}"></div></div></div>`;
+    fields = `${timeBox('Time', false)}
+      <div class="field"><label for="f-correct">Cards correct</label><div class="unit-wrap"><input id="f-correct" class="input big" inputmode="numeric" placeholder="52" value="${esc(L.correct)}"><span>of</span><input id="f-total" class="input big" inputmode="numeric" aria-label="Total cards" style="max-width:88px" value="${esc(L.total)}"></div></div>`;
   } else if (k === 'count_at_interval') {
     fields = `<div class="grid3">
       <div class="field"><label for="f-correct">Correct</label><input id="f-correct" class="input big" inputmode="numeric" value="${esc(L.correct)}"></div>
       <div class="field"><label for="f-total">Out of</label><input id="f-total" class="input big" inputmode="numeric" placeholder="opt." value="${esc(L.total)}"></div>
       <div class="field"><label for="f-interval">Seconds/digit</label><input id="f-interval" class="input big" inputmode="decimal" value="${esc(L.interval)}"></div></div>`;
   } else {
-    fields = `<div class="grid3">
+    fields = `<div class="grid2">
       <div class="field"><label for="f-correct">Correct</label><input id="f-correct" class="input big" inputmode="numeric" value="${esc(L.correct)}"></div>
-      <div class="field"><label for="f-total">Out of</label><input id="f-total" class="input big" inputmode="numeric" placeholder="opt." value="${esc(L.total)}"></div>
-      <div class="field"><label for="f-time">Time used</label><input id="f-time" class="input big" inputmode="decimal" placeholder="opt." value="${esc(L.time)}"></div></div>`;
+      <div class="field"><label for="f-total">Out of</label><input id="f-total" class="input big" inputmode="numeric" placeholder="opt." value="${esc(L.total)}"></div></div>
+      ${TIME_USED_EVENTS.includes(ev.id) ? timeBox('Time used', true) : ''}`;
   }
   let wrong = '';
   if (ev.ems_kind) {
@@ -1742,24 +1761,16 @@ function viewLog() {
         <span id="wrong-hint" class="hint">Press space or Enter after each code.</span>${L.wrongErr ? `<span class="err" role="alert">${esc(L.wrongErr)}</span>` : ''}</div>`;
     }
   }
-  const drill = L.newDrill ? `<div class="card stack" style="gap:10px"><div class="grid2">
-      <div class="field"><label for="f-drill-items">${esc(unit[0].toUpperCase() + unit.slice(1))} per attempt</label><input id="f-drill-items" class="input" inputmode="numeric" placeholder="40"></div>
-      ${ev.id === 'spoken' ? '<div class="field"><label for="f-drill-interval">Seconds per digit</label><input id="f-drill-interval" class="input" inputmode="decimal" placeholder="0.9"></div>' : '<div class="field"><label for="f-drill-mem">Memorisation limit (min)</label><input id="f-drill-mem" class="input" inputmode="decimal" placeholder="opt."></div>'}
-    </div><div style="display:flex;gap:8px"><button type="button" class="btn primary" data-act="create-drill">Create drill</button><button type="button" class="btn" data-act="cancel-drill">Cancel</button></div></div>` : '';
   const editing = !!L.editingId;
   return `<main class="shell">
     <header class="topbar"><a href="${editing ? '#/attempt/' + esc(L.editingId) : '#/today'}" style="min-height:44px;display:flex;align-items:center">Cancel</a><h1 style="font-size:18px">${editing ? 'Edit attempt' : 'Log attempt'}</h1><span class="small muted">${esc(fmtShort(L.date))}</span></header>
     <form id="log-form" class="section stack" style="gap:18px" novalidate>
       <fieldset style="border:0;margin:0;padding:0"><legend class="label" style="margin-bottom:8px">Event</legend><div class="tiles">${tiles}</div></fieldset>
-      ${editing ? '' : `<div class="field"><label for="f-quick">Quick entry</label>
-        <textarea id="f-quick" class="input big" rows="1" autocomplete="off" placeholder="${k === 'time' ? '35.7s (50)' : k === 'count_at_interval' ? '30/100 (0.9)' : '40/40 (1m 56s)'}" aria-describedby="quick-preview">${esc(L.quick)}</textarea>
-        <div id="quick-preview" aria-live="polite"><span class="hint">Type it the way you did in the sheet. One attempt per line.</span></div></div>`}
       <div class="grid2">
-        <div class="field"><label for="f-format">Format</label><select id="f-format" class="input">${fmts.map((f) => opt(f.id, f.name, f.id === L.formatId)).join('')}${opt('__new', 'New drill…', false)}</select></div>
+        <div class="field"><label for="f-format">Format</label><select id="f-format" class="input">${fmts.map((f) => opt(f.id, f.name, f.id === L.formatId)).join('')}</select></div>
         <div class="field"><label for="f-date">Date</label><input id="f-date" class="input" type="date" value="${esc(L.date)}" max="${today}"${isAdmin() ? '' : ` min="${addDays(today, -7)}"`}></div>
       </div>
       ${ghostBox(state.me.id, L.formatId)}
-      ${drill}
       ${fields}
       ${wrong}
       <div class="field"><label for="f-note">Note <span class="muted" style="font-weight:400">(optional)</span></label><textarea id="f-note" class="input" rows="2" placeholder="e.g. lost focus at card 30">${esc(L.note)}</textarea></div>
@@ -1780,21 +1791,29 @@ function ghostBox(athleteId, formatId, excludeId, ref) {
   const cell = (g, label) => g && g.id !== excludeId ? `<div><div class="tiny muted">${label} · ${esc(fmtShort(g.practiced_on))}</div><div class="num" style="font-size:20px">${esc(fmtResult(g))}</div></div>` : `<div><div class="tiny muted">${label}</div><div class="muted">–</div></div>`;
   return `<div class="card" style="padding:10px 14px"><div class="tiny" style="font-weight:700;margin-bottom:4px">Ghost race: ${ref ? 'results' : 'your results'} in this format</div><div class="grid2">${cell(g7, '7 days ago')}${cell(g30, '30 days ago')}</div></div>`;
 }
-function onQuickInput() {
-  const L = ui.log; const ev = state.eventsById[L.eventId]; const f = state.formatsById[$('#f-format').value];
-  const lines = $('#f-quick').value.split('\n').map((s) => s.trim()).filter(Boolean);
-  const box = $('#quick-preview'); const save = $('#btn-save'); const another = $('#btn-another');
-  if (!lines.length) { box.innerHTML = '<span class="hint">Type it the way you did in the sheet. One attempt per line.</span>'; if (save) save.textContent = 'Save'; if (another) another.hidden = false; return; }
-  const parsed = lines.map((l) => parseEntry(l, ev, f));
-  if (lines.length === 1) {
-    const p = parsed[0];
-    box.innerHTML = `<span class="${p.ok ? 'parse-ok' : 'parse-bad'}">${esc(describeParsed(p, ev))}</span>`;
-    if (p.ok) fillFields(p, ev);
-    if (save) save.textContent = 'Save'; if (another) another.hidden = false;
-  } else {
-    box.innerHTML = `<ul class="small" style="margin:0;padding-left:18px">${parsed.map((p) => `<li class="${p.ok ? 'parse-ok' : 'parse-bad'}">${esc(p.line)}: ${esc(p.ok ? describeParsed(p, ev).replace(/^Read as /, '') : p.error)}</li>`).join('')}</ul><span class="hint">Each line saves as its own attempt. Wrong items and screenshots only apply when you log one attempt.</span>`;
-    if (save) save.textContent = `Save ${lines.length} attempts`; if (another) another.hidden = true;
-  }
+/* Count events that still ask for time used (the team removed it from the others) */
+const TIME_USED_EVENTS = ['long_number', 'long_card'];
+/* Time entry: separate minutes and seconds so 1:04 and 35.7 s can't be confused */
+function splitTime(v) {
+  if (v === '' || v == null || v === 'invalid') return { min: '', sec: '' };
+  const t = Number(v); if (isNaN(t)) return { min: '', sec: '' };
+  const m = Math.floor(t / 60); const sv = Math.round((t - m * 60) * 100) / 100;
+  if (!m) return { min: '', sec: String(sv) };
+  const [ip, fp] = String(sv).split('.');
+  return { min: String(m), sec: ip.padStart(2, '0') + (fp ? '.' + fp : '') };
+}
+function joinTime(min, sec) {
+  const m = (min || '').trim(), s = (sec || '').trim();
+  if (!m && !s) return '';
+  const mn = m ? Number(m) : 0, sn = s ? Number(s) : 0;
+  if (isNaN(mn) || isNaN(sn) || mn < 0 || sn < 0 || !Number.isInteger(mn) || (mn > 0 && sn >= 60)) return 'invalid';
+  return String(Math.round((mn * 60 + sn) * 100) / 100);
+}
+function timeReadout(min, sec) {
+  const t = joinTime(min, sec);
+  if (t === '') return 'Enter seconds; add minutes for anything over a minute.';
+  if (t === 'invalid') return 'Minutes must be a whole number, and seconds under 60 when minutes are used.';
+  return `= ${fmtTime(Number(t))}${Number(t) >= 60 ? ` (${Math.floor(Number(t) / 60)} min ${trimNum(Number(t) % 60, 2)} sec)` : ''}`;
 }
 function spokenFormatFor(interval, currentId) {
   const cur = state.formatsById[currentId];
@@ -1802,21 +1821,12 @@ function spokenFormatFor(interval, currentId) {
   const m = formatsFor('spoken', currentId).find((f) => Number(f.interval_seconds) === Number(interval));
   return m ? m.id : currentId;
 }
-function fillFields(p, ev) {
-  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v ?? ''; };
-  set('f-correct', p.items_correct); set('f-total', p.items_total);
-  if (document.getElementById('f-time')) set('f-time', p.time_seconds != null ? trimNum(p.time_seconds, 2) : '');
-  if (ev.result_kind === 'count_at_interval') {
-    set('f-interval', p.interval_seconds);
-    const sel = $('#f-format'); const fid = spokenFormatFor(p.interval_seconds, sel.value); if (fid !== sel.value) sel.value = fid;
-  }
-  const note = $('#f-note'); if (p.note && note && !note.value) note.value = p.note;
-}
 function rowFromFields() {
   const L = ui.log; const k = kindOf(L.eventId);
   const correct = numOrNull(L.correct), total = numOrNull(L.total), interval = numOrNull(L.interval);
-  const time = L.time === '' || L.time == null ? null : parseTimeInput(L.time);
-  if (Number.isNaN(time)) return 'Time should look like 35.7, 1:04 or 1m 4s.';
+  if (L.time === 'invalid') return 'Check the time: minutes must be a whole number, and seconds under 60 when minutes are used.';
+  const time = L.time === '' || L.time == null ? null : Number(L.time);
+  if (Number.isNaN(time)) return 'Check the time.';
   if ([correct, total, interval].some((v) => Number.isNaN(v))) return 'Scores must be numbers.';
   if ([correct, total].some((v) => v != null && (v < 0 || !Number.isInteger(v)))) return 'Scores must be whole numbers.';
   if (k === 'time' && correct == null && time == null) return 'Enter a time or the number of cards correct.';
@@ -1824,10 +1834,6 @@ function rowFromFields() {
   if (correct != null && total != null && correct > total) return 'Correct can’t be higher than the total.';
   const tot = total ?? (k === 'time' ? 52 : null);
   return { event_id: L.eventId, format_id: k === 'count_at_interval' ? spokenFormatFor(interval, L.formatId) : L.formatId, practiced_on: L.date, items_correct: correct ?? (k === 'time' ? tot : null), items_total: tot, time_seconds: time, interval_seconds: k === 'count_at_interval' ? interval : null, note: (L.note || '').trim(), is_valid: !L.abandoned };
-}
-function rowFromParsed(p) {
-  const L = ui.log; const k = kindOf(L.eventId);
-  return { event_id: L.eventId, format_id: k === 'count_at_interval' ? spokenFormatFor(p.interval_seconds, L.formatId) : L.formatId, practiced_on: L.date, items_correct: p.items_correct, items_total: p.items_total, time_seconds: p.time_seconds, interval_seconds: k === 'count_at_interval' ? p.interval_seconds : null, note: p.note || '', is_valid: !L.abandoned };
 }
 function logErr(msg) { if (ui.log) ui.log.err = msg; const el = $('#log-err'); if (el) { el.textContent = msg; el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } }
 function commitWrong() {
@@ -1847,14 +1853,8 @@ async function saveLog(another) {
   if (!L.date) return logErr('Choose a date.');
   const today = TODAY();
   if (!isAdmin() && (L.date > today || L.date < addDays(today, -7))) return logErr('The date must be within the last 7 days.');
-  const lines = (L.quick || '').split('\n').map((s) => s.trim()).filter(Boolean);
-  let rows = [];
-  if (lines.length > 1 && !L.editingId) {
-    const f = state.formatsById[L.formatId];
-    for (const l of lines) { const p = parseEntry(l, ev, f); if (!p.ok) return logErr(`Fix or remove “${l}”: ${p.error}.`); rows.push(rowFromParsed(p)); }
-  } else {
-    const r = rowFromFields(); if (typeof r === 'string') return logErr(r); rows = [r];
-  }
+  const r = rowFromFields(); if (typeof r === 'string') return logErr(r);
+  const rows = [r];
   const sys = ev.ems_kind ? myEms(ev.ems_kind) : null;
   const errRows = rows.length === 1 && sys ? L.wrong.map((c) => ({ item_code: c, ems_system_id: sys.id })) : [];
   setBusy(true);
@@ -2144,16 +2144,16 @@ function viewAdmin() {
     body = `<form id="format-form" class="card stack" novalidate><h2>Add a format</h2>
       <div class="grid2">
         <div class="field"><label for="fm-event">Event</label><select id="fm-event" class="input">${state.events.map((e) => opt(e.id, e.name, e.id === fev.id)).join('')}</select></div>
-        <div class="field"><label for="fm-name">Name</label><input id="fm-name" class="input" required maxlength="60" placeholder="e.g. 5-min standard"></div>
+        <div class="field"><label for="fm-name">Name</label><input id="fm-name" class="input" required maxlength="60" placeholder="e.g. 10 min"></div>
         <div class="field"><label for="fm-items">Items per attempt</label><input id="fm-items" class="input" inputmode="numeric" placeholder="opt."></div>
         <div class="field"><label for="fm-mem">Memorisation limit (s)</label><input id="fm-mem" class="input" inputmode="numeric" placeholder="opt."></div>
         ${fev.id === 'spoken' ? '<div class="field"><label for="fm-int">Seconds per digit</label><input id="fm-int" class="input" inputmode="decimal"></div>' : ''}
       </div>
-      <label class="check"><input id="fm-std" type="checkbox" checked> Standard format (appears on raw-score leaderboards)</label>
+      <p class="tiny muted" style="margin:0">New formats appear in Log and on the raw-score leaderboards. Hide a format to retire it without losing its history.</p>
       <div><button class="btn primary" type="submit">Add format</button></div></form>
-      <div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>Format</th><th>Standard</th><th>Items</th><th>Mem. limit</th>${fev.id === 'spoken' ? '<th>s/digit</th>' : ''}<th>Attempts</th><th><span class="sr">Actions</span></th></tr></thead><tbody>
+      <div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>Format</th><th>In Log</th><th>Items</th><th>Mem. limit</th>${fev.id === 'spoken' ? '<th>s/digit</th>' : ''}<th>Attempts</th><th><span class="sr">Actions</span></th></tr></thead><tbody>
       ${fl.map((f) => `<tr><td>${esc(f.name)}${f.created_by && !state.profilesById[f.created_by]?.role?.includes('admin') ? ` <span class="tiny muted">by ${esc(initialsOf(f.created_by))}</span>` : ''}</td><td>${f.is_standard ? 'Yes' : 'No'}</td><td>${f.item_count ?? '–'}</td><td>${f.mem_seconds ? esc(fmtTime(f.mem_seconds)) : '–'}</td>${fev.id === 'spoken' ? `<td>${f.interval_seconds ?? '–'}</td>` : ''}<td>${counts[f.id] || 0}</td>
-        <td><div style="display:flex;gap:6px"><button type="button" class="btn sm" data-act="format-std" data-id="${esc(f.id)}">${f.is_standard ? 'Unmark standard' : 'Mark standard'}</button>${counts[f.id] ? '' : `<button type="button" class="btn sm danger" data-act="format-delete" data-id="${esc(f.id)}">Delete</button>`}</div></td></tr>`).join('')}
+        <td><div style="display:flex;gap:6px"><button type="button" class="btn sm" data-act="format-std" data-id="${esc(f.id)}">${f.is_standard ? 'Hide from Log' : 'Show in Log'}</button>${counts[f.id] ? '' : `<button type="button" class="btn sm danger" data-act="format-delete" data-id="${esc(f.id)}">Delete</button>`}</div></td></tr>`).join('')}
       </tbody></table></div>`;
   } else {
     if (!A.audit) { body = '<div class="empty">Loading…</div>'; loadAudit(); }
@@ -2309,7 +2309,7 @@ document.addEventListener('change', (e) => {
   if (t.id === 'fm-event') { ui.admin.fmEvent = t.value; render(); }
 });
 document.addEventListener('input', (e) => {
-  if (e.target.id === 'f-quick') { onQuickInput(); const ta = e.target; ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }
+  if (e.target.id === 'f-time-min' || e.target.id === 'f-time-sec') { const r = $('#time-readout'); if (r) r.textContent = timeReadout($('#f-time-min').value, $('#f-time-sec').value); }
   if (e.target.id === 'f-wrong' && /[\s,;]/.test(e.target.value)) commitWrong();
 });
 document.addEventListener('keydown', (e) => {
@@ -2351,7 +2351,7 @@ document.addEventListener('submit', (e) => {
   } else if (f.id === 'format-form') {
     const name = $('#fm-name').value.trim(); if (!name) { toast('Name the format.'); return; }
     const n = (id) => { const el = $(id); if (!el || !el.value.trim()) return null; const v = Number(el.value); return isNaN(v) ? NaN : v; };
-    const row = { event_id: $('#fm-event').value, name, is_standard: $('#fm-std').checked, item_count: n('#fm-items'), mem_seconds: n('#fm-mem'), interval_seconds: n('#fm-int') };
+    const row = { event_id: $('#fm-event').value, name, is_standard: true, item_count: n('#fm-items'), mem_seconds: n('#fm-mem'), interval_seconds: n('#fm-int') };
     if ([row.item_count, row.mem_seconds, row.interval_seconds].some((v) => Number.isNaN(v))) { toast('Items, limit and interval must be numbers.'); return; }
     act(async () => { await store.insertFormat(row); await loadData(); toast('Format added'); render(); });
   }
