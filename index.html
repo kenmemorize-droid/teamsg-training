@@ -194,6 +194,29 @@ tr:last-child td{border-bottom:0}
 .h2h{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)}
 .h2h .side{font-family:var(--num);font-size:20px;font-weight:600}
 .h2h .win{color:var(--green);font-weight:700}
+.ladder{padding:10px 0;border-bottom:1px solid var(--line)}
+.ladder-grid{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:4px;margin-top:6px}
+.ladder-grid .lchip{min-width:0;padding:0 1px;font-size:12px;letter-spacing:-.01em;overflow:hidden;white-space:nowrap}
+.ladder-counts{display:flex;align-items:center;gap:5px;margin-top:6px}
+.lchip{display:inline-flex;align-items:center;justify-content:center;min-width:36px;height:26px;padding:0 7px;border-radius:13px;font-family:var(--num);font-size:14px;font-weight:700;color:#1B2A41}
+.lchip.locked{border:1px dashed var(--line);color:var(--muted);background:transparent}
+.tier-bronze{background:#E2B07E;color:#1B2A41}
+.tier-silver{background:#CDD3DA;color:#1B2A41}
+.tier-gold{background:#E6C65C;color:#1B2A41}
+.tier-platinum{background:#BFE0EE;color:#1B2A41;box-shadow:inset 0 0 0 1px #6FA8C0}
+.badge .medal{font-size:20px;line-height:1}
+.info-btn{width:26px;height:26px;border-radius:13px;border:1px solid var(--line);background:var(--surface);color:var(--muted);font:italic 700 14px/1 Georgia,serif;cursor:pointer;flex:none}
+.info-btn[aria-expanded="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.info-panel{margin-top:8px;padding:10px 14px;border-radius:10px;background:var(--surface);border:1px solid var(--line);font-size:13px;color:var(--ink)}
+.info-panel ul{margin:0;padding-left:18px}
+.hero .info-btn{width:24px;height:24px;background:transparent;color:var(--hero-ink);border-color:var(--hero-muted)}
+.info-panel li{margin:3px 0}
+.collapse-head{display:flex;justify-content:space-between;align-items:center;width:100%;min-height:44px;padding:0;border:0;border-bottom:1px solid var(--line);background:none;color:var(--ink);cursor:pointer;text-align:left}
+.proof-actions{display:flex;gap:8px;flex-wrap:wrap}
+.proof-preview{display:flex;align-items:center;gap:10px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.proof-preview img{width:56px;height:56px;object-fit:cover;border-radius:6px}
+.paste-target{min-height:40px;font-size:13px;color:var(--muted)}
+.medal-sm{width:36px;height:36px;flex:none;border-radius:18px;display:flex;align-items:center;justify-content:center}
 .recap-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
 .modal-backdrop{position:fixed;inset:0;z-index:30;background:rgba(14,21,32,.55);display:flex;align-items:center;justify-content:center;padding:20px}
 .modal{background:var(--surface);color:var(--ink);border-radius:14px;padding:20px;width:100%;max-width:420px;box-shadow:0 10px 40px rgba(0,0,0,.3)}
@@ -295,7 +318,6 @@ const EVENT_SEED = [
 ];
 // Standard formats: names/durations marked "confirm" are open item G1 in the design doc.
 const FORMAT_SEED = [
-  { event_id: 'names_faces', name: '1 min', is_standard: true, mem_seconds: 60 },
   { event_id: 'names_faces', name: '5 min', is_standard: true, mem_seconds: 300 },
   { event_id: 'names_faces', name: '15 min', is_standard: true, mem_seconds: 900 },
   { event_id: 'binary', name: '1 min', is_standard: true, mem_seconds: 60 },
@@ -457,7 +479,7 @@ function indexState(d, uid) {
   state.ems = d.ems;
   state.emsItems = d.emsItems || [];
   state.settings = { ...SETTING_DEFAULTS, ...Object.fromEntries((d.settings || []).map((x) => [x.key, +x.value])) };
-  state.badges = (d.badges && d.badges.length ? d.badges : BADGE_DEFAULTS).map((b) => ({ ...b, threshold: b.threshold == null ? null : +b.threshold, threshold2: b.threshold2 == null ? null : +b.threshold2 })).sort((a, b) => a.sort_order - b.sort_order);
+  state.badges = (d.badges && d.badges.length ? d.badges : BADGE_DEFAULTS).map((b) => ({ ...b, kind: b.kind || 'special', threshold: b.threshold == null ? null : +b.threshold, threshold2: b.threshold2 == null ? null : +b.threshold2, format_seconds: b.format_seconds == null ? null : +b.format_seconds, rule: b.rule || null })).sort((a, b) => a.sort_order - b.sort_order);
   state.athleteBadges = d.athleteBadges || [];
   state.quests = d.quests || [];
   state.comments = (d.comments || []).slice().sort((a, b) => a.created_at.localeCompare(b.created_at));
@@ -538,22 +560,33 @@ function pctOfTarget(eventId, best, target) {
   if (best == null || !target) return null;
   return kindOf(eventId) === 'time' ? (target / best) * 100 : (best / target) * 100;
 }
+/* Streaks and freezes (team rule, Oct 2026): everyone starts with 2 freezes. A missed day uses one and keeps the streak.
+   Every 30 logged days in a row earns 1 back, up to 2. With none left, a missed day resets the streak.
+   onDay(day, streak) is called for each logged day, so badges can tell when a streak length was first reached. */
+const FREEZE_START = 2, FREEZE_MAX = 2, FREEZE_EVERY = 30;
+function walkStreak(days, today, onDay) {
+  let streak = 0, freezes = FREEZE_START, run = 0;
+  if (!days.size) return { streak, freezes };
+  const first = [...days].sort()[0];
+  for (let d = first; d <= today; d = addDays(d, 1)) {
+    if (days.has(d)) {
+      streak++; run++;
+      if (run % FREEZE_EVERY === 0) freezes = Math.min(FREEZE_MAX, freezes + 1);
+      if (onDay) onDay(d, streak);
+    } else if (d < today) {
+      run = 0;
+      if (streak > 0) { if (freezes > 0) freezes--; else streak = 0; }
+    }
+  }
+  return { streak, freezes };
+}
 function streakInfo(athleteId) {
   const key = 's:' + athleteId;
   if (state.memo[key]) return state.memo[key];
   const today = TODAY();
   const days = new Set(attemptsOf(athleteId).filter(effortOk).map((a) => a.practiced_on));
-  let streak = 0, freezes = 0;
-  if (days.size) {
-    const first = [...days].sort()[0];
-    for (let d = first; d < today; d = addDays(d, 1)) {
-      if (days.has(d)) { streak++; if (streak % 7 === 0) freezes = Math.min(2, freezes + 1); }
-      else if (streak > 0) { if (freezes > 0) freezes--; else streak = 0; }
-    }
-  }
-  const activeToday = days.has(today);
-  if (activeToday) { streak++; if (streak % 7 === 0) freezes = Math.min(2, freezes + 1); }
-  return (state.memo[key] = { streak, freezes, activeToday });
+  const r = walkStreak(days, today);
+  return (state.memo[key] = { streak: r.streak, freezes: r.freezes, activeToday: days.has(today) });
 }
 
 /* Leaderboards (design doc §8.2) */
@@ -660,6 +693,14 @@ function formatsFor(eventId, includeId) {
   return state.formats.filter((f) => f.event_id === eventId && (f.is_standard || f.id === includeId))
     .sort((a, b) => (b.is_standard - a.is_standard) || (a.mem_seconds ?? 0) - (b.mem_seconds ?? 0) || (a.interval_seconds ?? 0) - (b.interval_seconds ?? 0) || a.name.localeCompare(b.name, undefined, { numeric: true }));
 }
+/* Default format for an event: its standard (5 min; Long Cards 10 min; Long Numbers 15 min; Speed Card 52 cards; Spoken 1 s) */
+function defaultFormatFor(eventId) {
+  const list = formatsFor(eventId);
+  const want = eventId === 'spoken' ? (f) => Number(f.interval_seconds) === 1
+    : eventId === 'speed_card' ? (f) => f.is_standard
+    : (f) => f.mem_seconds === ({ long_card: 600, long_number: 900 }[eventId] ?? 300);
+  return (list.find(want) || list[0] || {}).id;
+}
 function lastFormatFor(athleteId, eventId) {
   const mine = attemptsOf(athleteId).filter((a) => a.event_id === eventId).sort((a, b) => (b.logged_at || '').localeCompare(a.logged_at || ''));
   if (mine.length && state.formatsById[mine[0].format_id]) return mine[0].format_id;
@@ -682,7 +723,10 @@ function drillName(eventId, total, interval) {
 'use strict';
 /* ================= v2: verification settings, badges, XP, quests, trouble items ================= */
 // Draft values from design doc §9 (open item G6) – editable in Admin → Settings.
-const SETTING_DEFAULTS = { big_jump_pct: 25, burst_count: 10, burst_minutes: 10, backdate_days: 3, proof_window_hours: 48, flag_edits: 1, weekly_team_goal: 150 };
+const SETTING_DEFAULTS = { big_jump_pct: 25, burst_count: 10, burst_minutes: 10, backdate_days: 3, proof_window_hours: 48, flag_edits: 1,
+  pool_xp_per_athlete: 50, pool_attempts_per_athlete: 6,
+  pool_items_spoken: 500, pool_items_speed_number: 500, pool_items_binary: 800, pool_items_images: 300,
+  pool_items_speed_card: 200, pool_items_words: 150, pool_items_names_faces: 60, pool_items_dates: 60 };
 const SETTING_LABELS = {
   big_jump_pct: ['Flag a result this % better than the athlete’s previous PB', '%'],
   burst_count: ['Flag more than this many attempts…', 'attempts'],
@@ -690,7 +734,16 @@ const SETTING_LABELS = {
   backdate_days: ['Flag entries backdated more than', 'days'],
   proof_window_hours: ['Ask for a screenshot on new standard-format PBs for', 'hours'],
   flag_edits: ['Flag edits to results (1 = yes, 0 = no)', ''],
-  weekly_team_goal: ['Weekly team goal', 'attempts']
+  pool_xp_per_athlete: ['Team pool: XP per active athlete', 'XP'],
+  pool_attempts_per_athlete: ['Team target (attempts week): attempts per active athlete', 'attempts'],
+  pool_items_spoken: ['Team target (correct items): Spoken Number, per active athlete', 'digits'],
+  pool_items_speed_number: ['Team target (correct items): Speed Number, per active athlete', 'digits'],
+  pool_items_binary: ['Team target (correct items): Binary, per active athlete', 'digits'],
+  pool_items_images: ['Team target (correct items): Images, per active athlete', 'images'],
+  pool_items_speed_card: ['Team target (correct items): Speed Card, per active athlete', 'cards'],
+  pool_items_words: ['Team target (correct items): Words, per active athlete', 'words'],
+  pool_items_names_faces: ['Team target (correct items): Names & Faces, per active athlete', 'names'],
+  pool_items_dates: ['Team target (correct items): Dates, per active athlete', 'dates']
 };
 const FLAG_LABELS = {
   team_best: 'Beats the team best in this format',
@@ -699,23 +752,35 @@ const FLAG_LABELS = {
   backdated: 'Backdated',
   edited: 'Result edited after logging'
 };
-// Design doc §8.5. Names for the 30- and 100-day streak badges are open item G7.
+// General badges (design doc §8.5) plus per-event ladders generated from the team's starter benchmarks.
+// Names for the 30- and 100-day streak badges are open item G7. All thresholds are editable in Admin → Badges.
 const BADGE_DEFAULTS = [
-  { id: 'first_deck', name: 'First deck', description: 'First 52/52 Speed Card', threshold: null, threshold2: null, sort_order: 1 },
-  { id: 'speed_card_t1', name: 'Sub-40', description: 'Speed Card 52/52 under {t} s', threshold: 40, threshold2: null, sort_order: 2 },
-  { id: 'speed_card_t2', name: 'Sub-35', description: 'Speed Card 52/52 under {t} s', threshold: 35, threshold2: null, sort_order: 3 },
-  { id: 'speed_card_t3', name: 'Sub-30', description: 'Speed Card 52/52 under {t} s', threshold: 30, threshold2: null, sort_order: 4 },
-  { id: 'perfect_ten', name: 'Perfect ten', description: '{t} fully correct attempts in a row in one format', threshold: 10, threshold2: null, sort_order: 5 },
-  { id: 'fast_ears', name: 'Fast ears', description: 'Spoken Number {t}+ at {t2} s per digit or faster', threshold: 100, threshold2: 0.9, sort_order: 6 },
-  { id: 'streak_7', name: 'Week warrior', description: '{t}-day streak', threshold: 7, threshold2: null, sort_order: 7 },
-  { id: 'streak_30', name: '30-day streak', description: '{t}-day streak', threshold: 30, threshold2: null, sort_order: 8 },
-  { id: 'streak_100', name: '100-day streak', description: '{t}-day streak', threshold: 100, threshold2: null, sort_order: 9 },
-  { id: 'decathlete', name: 'Decathlete', description: '{t} different events logged in one week', threshold: 10, threshold2: null, sort_order: 10 },
-  { id: 'bug_hunter', name: 'Bug hunter', description: '{t} wrong items logged', threshold: 50, threshold2: null, sort_order: 11 },
-  { id: 'fixed_it', name: 'Fixed it', description: 'A former top-10 trouble item with no errors for {t} days', threshold: 14, threshold2: null, sort_order: 12 },
-  { id: 'comeback', name: 'Comeback', description: 'Logged again after {t}+ days away', threshold: 14, threshold2: null, sort_order: 13 }
-];
-const badgeDesc = (b) => b.description.replace('{t2}', trimNum(b.threshold2, 2)).replace('{t}', trimNum(b.threshold, 2));
+  { id: 'first_deck', name: 'First deck', description: 'First 52/52 Speed Card', threshold: null, threshold2: null, sort_order: 1, kind: 'special' },
+  { id: 'perfect_ten', name: 'Perfect ten', description: '{t} fully correct attempts in a row in one format', threshold: 10, threshold2: null, sort_order: 5, kind: 'special' },
+  { id: 'fast_ears', name: 'Fast ears', description: 'Spoken Number {t}+ at {t2} s per digit or faster', threshold: 100, threshold2: 0.9, sort_order: 6, kind: 'special' },
+  { id: 'streak_7', name: 'Week warrior', description: '{t}-day streak', threshold: 7, threshold2: null, sort_order: 7, kind: 'special' },
+  { id: 'streak_30', name: '30-day streak', description: '{t}-day streak', threshold: 30, threshold2: null, sort_order: 8, kind: 'special' },
+  { id: 'streak_100', name: '100-day streak', description: '{t}-day streak', threshold: 100, threshold2: null, sort_order: 9, kind: 'special' },
+  { id: 'decathlete', name: 'Decathlete', description: '{t} different events logged in one week', threshold: 10, threshold2: null, sort_order: 10, kind: 'special' },
+  { id: 'bug_hunter', name: 'Bug hunter', description: '{t} wrong items logged', threshold: 50, threshold2: null, sort_order: 11, kind: 'special' },
+  { id: 'fixed_it', name: 'Fixed it', description: 'A former top-10 trouble item with no errors for {t} days', threshold: 14, threshold2: null, sort_order: 12, kind: 'special' }
+].concat([{"id": "level_names_faces_1", "name": "Names & Faces Level 1", "description": "", "threshold": 3, "threshold2": null, "sort_order": 100, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_names_faces_2", "name": "Names & Faces Level 2", "description": "", "threshold": 6, "threshold2": null, "sort_order": 101, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_names_faces_3", "name": "Names & Faces Level 3", "description": "", "threshold": 9, "threshold2": null, "sort_order": 102, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_names_faces_4", "name": "Names & Faces Level 4", "description": "", "threshold": 12, "threshold2": null, "sort_order": 103, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_names_faces_5", "name": "Names & Faces Level 5", "description": "", "threshold": 15, "threshold2": null, "sort_order": 104, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_names_faces_6", "name": "Names & Faces Level 6", "description": "", "threshold": 18, "threshold2": null, "sort_order": 105, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_names_faces_7", "name": "Names & Faces Level 7", "description": "", "threshold": 21, "threshold2": null, "sort_order": 106, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_names_faces_8", "name": "Names & Faces Level 8", "description": "", "threshold": 24, "threshold2": null, "sort_order": 107, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_names_faces_9", "name": "Names & Faces Level 9", "description": "", "threshold": 27, "threshold2": null, "sort_order": 108, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_names_faces_10", "name": "Names & Faces Level 10", "description": "", "threshold": 30, "threshold2": null, "sort_order": 109, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_names_faces_11", "name": "Names & Faces Level 11", "description": "", "threshold": 34, "threshold2": null, "sort_order": 110, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_names_faces_12", "name": "Names & Faces Level 12", "description": "", "threshold": 38, "threshold2": null, "sort_order": 111, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_names_faces_13", "name": "Names & Faces Level 13", "description": "", "threshold": 42, "threshold2": null, "sort_order": 112, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_names_faces_14", "name": "Names & Faces Level 14", "description": "", "threshold": 46, "threshold2": null, "sort_order": 113, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_names_faces_15", "name": "Names & Faces Level 15", "description": "", "threshold": 50, "threshold2": null, "sort_order": 114, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_names_faces_16", "name": "Names & Faces Level 16", "description": "", "threshold": 54, "threshold2": null, "sort_order": 115, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_names_faces_17", "name": "Names & Faces Level 17", "description": "", "threshold": 58, "threshold2": null, "sort_order": 116, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_names_faces_18", "name": "Names & Faces Level 18", "description": "", "threshold": 62, "threshold2": null, "sort_order": 117, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_names_faces_19", "name": "Names & Faces Level 19", "description": "", "threshold": 66, "threshold2": null, "sort_order": 118, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_names_faces_20", "name": "Names & Faces Level 20", "description": "", "threshold": 70, "threshold2": null, "sort_order": 119, "kind": "score", "event_id": "names_faces", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "count_names_faces_10", "name": "Names & Faces · 10 attempts", "description": "10 Names & Faces attempts logged", "threshold": 10, "threshold2": null, "sort_order": 120, "kind": "attempt_count", "event_id": "names_faces", "format_seconds": null, "tier": "bronze", "rule": null}, {"id": "count_names_faces_50", "name": "Names & Faces · 50 attempts", "description": "50 Names & Faces attempts logged", "threshold": 50, "threshold2": null, "sort_order": 121, "kind": "attempt_count", "event_id": "names_faces", "format_seconds": null, "tier": "silver", "rule": null}, {"id": "count_names_faces_100", "name": "Names & Faces · 100 attempts", "description": "100 Names & Faces attempts logged", "threshold": 100, "threshold2": null, "sort_order": 122, "kind": "attempt_count", "event_id": "names_faces", "format_seconds": null, "tier": "gold", "rule": null}, {"id": "level_binary_1", "name": "Binary Level 1", "description": "", "threshold": 30, "threshold2": null, "sort_order": 200, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_binary_2", "name": "Binary Level 2", "description": "", "threshold": 60, "threshold2": null, "sort_order": 201, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_binary_3", "name": "Binary Level 3", "description": "", "threshold": 90, "threshold2": null, "sort_order": 202, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_binary_4", "name": "Binary Level 4", "description": "", "threshold": 120, "threshold2": null, "sort_order": 203, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_binary_5", "name": "Binary Level 5", "description": "", "threshold": 150, "threshold2": null, "sort_order": 204, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_binary_6", "name": "Binary Level 6", "description": "", "threshold": 180, "threshold2": null, "sort_order": 205, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_binary_7", "name": "Binary Level 7", "description": "", "threshold": 210, "threshold2": null, "sort_order": 206, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_binary_8", "name": "Binary Level 8", "description": "", "threshold": 250, "threshold2": null, "sort_order": 207, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_binary_9", "name": "Binary Level 9", "description": "", "threshold": 290, "threshold2": null, "sort_order": 208, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_binary_10", "name": "Binary Level 10", "description": "", "threshold": 330, "threshold2": null, "sort_order": 209, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_binary_11", "name": "Binary Level 11", "description": "", "threshold": 370, "threshold2": null, "sort_order": 210, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_binary_12", "name": "Binary Level 12", "description": "", "threshold": 410, "threshold2": null, "sort_order": 211, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_binary_13", "name": "Binary Level 13", "description": "", "threshold": 450, "threshold2": null, "sort_order": 212, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_binary_14", "name": "Binary Level 14", "description": "", "threshold": 490, "threshold2": null, "sort_order": 213, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_binary_15", "name": "Binary Level 15", "description": "", "threshold": 550, "threshold2": null, "sort_order": 214, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_binary_16", "name": "Binary Level 16", "description": "", "threshold": 610, "threshold2": null, "sort_order": 215, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_binary_17", "name": "Binary Level 17", "description": "", "threshold": 670, "threshold2": null, "sort_order": 216, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_binary_18", "name": "Binary Level 18", "description": "", "threshold": 730, "threshold2": null, "sort_order": 217, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_binary_19", "name": "Binary Level 19", "description": "", "threshold": 790, "threshold2": null, "sort_order": 218, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_binary_20", "name": "Binary Level 20", "description": "", "threshold": 850, "threshold2": null, "sort_order": 219, "kind": "score", "event_id": "binary", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "count_binary_10", "name": "Binary · 10 attempts", "description": "10 Binary attempts logged", "threshold": 10, "threshold2": null, "sort_order": 220, "kind": "attempt_count", "event_id": "binary", "format_seconds": null, "tier": "bronze", "rule": null}, {"id": "count_binary_50", "name": "Binary · 50 attempts", "description": "50 Binary attempts logged", "threshold": 50, "threshold2": null, "sort_order": 221, "kind": "attempt_count", "event_id": "binary", "format_seconds": null, "tier": "silver", "rule": null}, {"id": "count_binary_100", "name": "Binary · 100 attempts", "description": "100 Binary attempts logged", "threshold": 100, "threshold2": null, "sort_order": 222, "kind": "attempt_count", "event_id": "binary", "format_seconds": null, "tier": "gold", "rule": null}, {"id": "level_speed_number_1", "name": "Speed Number Level 1", "description": "", "threshold": 16, "threshold2": null, "sort_order": 300, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_speed_number_2", "name": "Speed Number Level 2", "description": "", "threshold": 32, "threshold2": null, "sort_order": 301, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_speed_number_3", "name": "Speed Number Level 3", "description": "", "threshold": 48, "threshold2": null, "sort_order": 302, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_speed_number_4", "name": "Speed Number Level 4", "description": "", "threshold": 64, "threshold2": null, "sort_order": 303, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_speed_number_5", "name": "Speed Number Level 5", "description": "", "threshold": 80, "threshold2": null, "sort_order": 304, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_speed_number_6", "name": "Speed Number Level 6", "description": "", "threshold": 100, "threshold2": null, "sort_order": 305, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_speed_number_7", "name": "Speed Number Level 7", "description": "", "threshold": 120, "threshold2": null, "sort_order": 306, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_speed_number_8", "name": "Speed Number Level 8", "description": "", "threshold": 140, "threshold2": null, "sort_order": 307, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_speed_number_9", "name": "Speed Number Level 9", "description": "", "threshold": 160, "threshold2": null, "sort_order": 308, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_speed_number_10", "name": "Speed Number Level 10", "description": "", "threshold": 180, "threshold2": null, "sort_order": 309, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_speed_number_11", "name": "Speed Number Level 11", "description": "", "threshold": 200, "threshold2": null, "sort_order": 310, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_speed_number_12", "name": "Speed Number Level 12", "description": "", "threshold": 220, "threshold2": null, "sort_order": 311, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_speed_number_13", "name": "Speed Number Level 13", "description": "", "threshold": 240, "threshold2": null, "sort_order": 312, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_speed_number_14", "name": "Speed Number Level 14", "description": "", "threshold": 260, "threshold2": null, "sort_order": 313, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_speed_number_15", "name": "Speed Number Level 15", "description": "", "threshold": 280, "threshold2": null, "sort_order": 314, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_speed_number_16", "name": "Speed Number Level 16", "description": "", "threshold": 300, "threshold2": null, "sort_order": 315, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_speed_number_17", "name": "Speed Number Level 17", "description": "", "threshold": 320, "threshold2": null, "sort_order": 316, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_speed_number_18", "name": "Speed Number Level 18", "description": "", "threshold": 344, "threshold2": null, "sort_order": 317, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_speed_number_19", "name": "Speed Number Level 19", "description": "", "threshold": 368, "threshold2": null, "sort_order": 318, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_speed_number_20", "name": "Speed Number Level 20", "description": "", "threshold": 392, "threshold2": null, "sort_order": 319, "kind": "score", "event_id": "speed_number", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "count_speed_number_10", "name": "Speed Number · 10 attempts", "description": "10 Speed Number attempts logged", "threshold": 10, "threshold2": null, "sort_order": 320, "kind": "attempt_count", "event_id": "speed_number", "format_seconds": null, "tier": "bronze", "rule": null}, {"id": "count_speed_number_50", "name": "Speed Number · 50 attempts", "description": "50 Speed Number attempts logged", "threshold": 50, "threshold2": null, "sort_order": 321, "kind": "attempt_count", "event_id": "speed_number", "format_seconds": null, "tier": "silver", "rule": null}, {"id": "count_speed_number_100", "name": "Speed Number · 100 attempts", "description": "100 Speed Number attempts logged", "threshold": 100, "threshold2": null, "sort_order": 322, "kind": "attempt_count", "event_id": "speed_number", "format_seconds": null, "tier": "gold", "rule": null}, {"id": "level_long_number_1", "name": "Long Numbers Level 1", "description": "", "threshold": 32, "threshold2": null, "sort_order": 400, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "bronze", "rule": null}, {"id": "level_long_number_2", "name": "Long Numbers Level 2", "description": "", "threshold": 64, "threshold2": null, "sort_order": 401, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "bronze", "rule": null}, {"id": "level_long_number_3", "name": "Long Numbers Level 3", "description": "", "threshold": 96, "threshold2": null, "sort_order": 402, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "bronze", "rule": null}, {"id": "level_long_number_4", "name": "Long Numbers Level 4", "description": "", "threshold": 128, "threshold2": null, "sort_order": 403, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "bronze", "rule": null}, {"id": "level_long_number_5", "name": "Long Numbers Level 5", "description": "", "threshold": 160, "threshold2": null, "sort_order": 404, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "bronze", "rule": null}, {"id": "level_long_number_6", "name": "Long Numbers Level 6", "description": "", "threshold": 200, "threshold2": null, "sort_order": 405, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "silver", "rule": null}, {"id": "level_long_number_7", "name": "Long Numbers Level 7", "description": "", "threshold": 240, "threshold2": null, "sort_order": 406, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "silver", "rule": null}, {"id": "level_long_number_8", "name": "Long Numbers Level 8", "description": "", "threshold": 280, "threshold2": null, "sort_order": 407, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "silver", "rule": null}, {"id": "level_long_number_9", "name": "Long Numbers Level 9", "description": "", "threshold": 320, "threshold2": null, "sort_order": 408, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "silver", "rule": null}, {"id": "level_long_number_10", "name": "Long Numbers Level 10", "description": "", "threshold": 360, "threshold2": null, "sort_order": 409, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "silver", "rule": null}, {"id": "level_long_number_11", "name": "Long Numbers Level 11", "description": "", "threshold": 400, "threshold2": null, "sort_order": 410, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "gold", "rule": null}, {"id": "level_long_number_12", "name": "Long Numbers Level 12", "description": "", "threshold": 440, "threshold2": null, "sort_order": 411, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "gold", "rule": null}, {"id": "level_long_number_13", "name": "Long Numbers Level 13", "description": "", "threshold": 480, "threshold2": null, "sort_order": 412, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "gold", "rule": null}, {"id": "level_long_number_14", "name": "Long Numbers Level 14", "description": "", "threshold": 520, "threshold2": null, "sort_order": 413, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "gold", "rule": null}, {"id": "level_long_number_15", "name": "Long Numbers Level 15", "description": "", "threshold": 560, "threshold2": null, "sort_order": 414, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "gold", "rule": null}, {"id": "level_long_number_16", "name": "Long Numbers Level 16", "description": "", "threshold": 600, "threshold2": null, "sort_order": 415, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "platinum", "rule": null}, {"id": "level_long_number_17", "name": "Long Numbers Level 17", "description": "", "threshold": 650, "threshold2": null, "sort_order": 416, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "platinum", "rule": null}, {"id": "level_long_number_18", "name": "Long Numbers Level 18", "description": "", "threshold": 700, "threshold2": null, "sort_order": 417, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "platinum", "rule": null}, {"id": "level_long_number_19", "name": "Long Numbers Level 19", "description": "", "threshold": 750, "threshold2": null, "sort_order": 418, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "platinum", "rule": null}, {"id": "level_long_number_20", "name": "Long Numbers Level 20", "description": "", "threshold": 800, "threshold2": null, "sort_order": 419, "kind": "score", "event_id": "long_number", "format_seconds": 900, "tier": "platinum", "rule": null}, {"id": "count_long_number_10", "name": "Long Numbers · 10 attempts", "description": "10 Long Numbers attempts logged", "threshold": 10, "threshold2": null, "sort_order": 420, "kind": "attempt_count", "event_id": "long_number", "format_seconds": null, "tier": "bronze", "rule": null}, {"id": "count_long_number_50", "name": "Long Numbers · 50 attempts", "description": "50 Long Numbers attempts logged", "threshold": 50, "threshold2": null, "sort_order": 421, "kind": "attempt_count", "event_id": "long_number", "format_seconds": null, "tier": "silver", "rule": null}, {"id": "count_long_number_100", "name": "Long Numbers · 100 attempts", "description": "100 Long Numbers attempts logged", "threshold": 100, "threshold2": null, "sort_order": 422, "kind": "attempt_count", "event_id": "long_number", "format_seconds": null, "tier": "gold", "rule": null}, {"id": "level_spoken_1", "name": "Spoken Number Level 1", "description": "", "threshold": 5, "threshold2": 1.0, "sort_order": 500, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "bronze", "rule": null}, {"id": "level_spoken_2", "name": "Spoken Number Level 2", "description": "", "threshold": 10, "threshold2": 1.0, "sort_order": 501, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "bronze", "rule": null}, {"id": "level_spoken_3", "name": "Spoken Number Level 3", "description": "", "threshold": 15, "threshold2": 1.0, "sort_order": 502, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "bronze", "rule": null}, {"id": "level_spoken_4", "name": "Spoken Number Level 4", "description": "", "threshold": 20, "threshold2": 1.0, "sort_order": 503, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "bronze", "rule": null}, {"id": "level_spoken_5", "name": "Spoken Number Level 5", "description": "", "threshold": 25, "threshold2": 1.0, "sort_order": 504, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "bronze", "rule": null}, {"id": "level_spoken_6", "name": "Spoken Number Level 6", "description": "", "threshold": 30, "threshold2": 1.0, "sort_order": 505, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "silver", "rule": null}, {"id": "level_spoken_7", "name": "Spoken Number Level 7", "description": "", "threshold": 35, "threshold2": 1.0, "sort_order": 506, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "silver", "rule": null}, {"id": "level_spoken_8", "name": "Spoken Number Level 8", "description": "", "threshold": 40, "threshold2": 1.0, "sort_order": 507, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "silver", "rule": null}, {"id": "level_spoken_9", "name": "Spoken Number Level 9", "description": "", "threshold": 45, "threshold2": 1.0, "sort_order": 508, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "silver", "rule": null}, {"id": "level_spoken_10", "name": "Spoken Number Level 10", "description": "", "threshold": 50, "threshold2": 1.0, "sort_order": 509, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "silver", "rule": null}, {"id": "level_spoken_11", "name": "Spoken Number Level 11", "description": "", "threshold": 60, "threshold2": 1.0, "sort_order": 510, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "gold", "rule": null}, {"id": "level_spoken_12", "name": "Spoken Number Level 12", "description": "", "threshold": 70, "threshold2": 1.0, "sort_order": 511, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "gold", "rule": null}, {"id": "level_spoken_13", "name": "Spoken Number Level 13", "description": "", "threshold": 85, "threshold2": 1.0, "sort_order": 512, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "gold", "rule": null}, {"id": "level_spoken_14", "name": "Spoken Number Level 14", "description": "", "threshold": 100, "threshold2": 1.0, "sort_order": 513, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "gold", "rule": null}, {"id": "level_spoken_15", "name": "Spoken Number Level 15", "description": "", "threshold": 115, "threshold2": 1.0, "sort_order": 514, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "gold", "rule": null}, {"id": "level_spoken_16", "name": "Spoken Number Level 16", "description": "", "threshold": 135, "threshold2": 1.0, "sort_order": 515, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "platinum", "rule": null}, {"id": "level_spoken_17", "name": "Spoken Number Level 17", "description": "", "threshold": 160, "threshold2": 1.0, "sort_order": 516, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "platinum", "rule": null}, {"id": "level_spoken_18", "name": "Spoken Number Level 18", "description": "", "threshold": 190, "threshold2": 1.0, "sort_order": 517, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "platinum", "rule": null}, {"id": "level_spoken_19", "name": "Spoken Number Level 19", "description": "", "threshold": 220, "threshold2": 1.0, "sort_order": 518, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "platinum", "rule": null}, {"id": "level_spoken_20", "name": "Spoken Number Level 20", "description": "", "threshold": 250, "threshold2": 1.0, "sort_order": 519, "kind": "score", "event_id": "spoken", "format_seconds": null, "tier": "platinum", "rule": null}, {"id": "count_spoken_10", "name": "Spoken Number · 10 attempts", "description": "10 Spoken Number attempts logged", "threshold": 10, "threshold2": null, "sort_order": 520, "kind": "attempt_count", "event_id": "spoken", "format_seconds": null, "tier": "bronze", "rule": null}, {"id": "count_spoken_50", "name": "Spoken Number · 50 attempts", "description": "50 Spoken Number attempts logged", "threshold": 50, "threshold2": null, "sort_order": 521, "kind": "attempt_count", "event_id": "spoken", "format_seconds": null, "tier": "silver", "rule": null}, {"id": "count_spoken_100", "name": "Spoken Number · 100 attempts", "description": "100 Spoken Number attempts logged", "threshold": 100, "threshold2": null, "sort_order": 522, "kind": "attempt_count", "event_id": "spoken", "format_seconds": null, "tier": "gold", "rule": null}, {"id": "level_speed_card_1", "name": "Speed Card Level 1", "description": "", "threshold": 10, "threshold2": null, "sort_order": 600, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "bronze", "rule": "cards_correct"}, {"id": "level_speed_card_2", "name": "Speed Card Level 2", "description": "", "threshold": 20, "threshold2": null, "sort_order": 601, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "bronze", "rule": "cards_correct"}, {"id": "level_speed_card_3", "name": "Speed Card Level 3", "description": "", "threshold": 30, "threshold2": null, "sort_order": 602, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "bronze", "rule": "cards_correct"}, {"id": "level_speed_card_4", "name": "Speed Card Level 4", "description": "", "threshold": 40, "threshold2": null, "sort_order": 603, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "bronze", "rule": "cards_correct"}, {"id": "level_speed_card_5", "name": "Speed Card Level 5", "description": "", "threshold": 300, "threshold2": null, "sort_order": 604, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "bronze", "rule": "time_at_most"}, {"id": "level_speed_card_6", "name": "Speed Card Level 6", "description": "", "threshold": 225, "threshold2": null, "sort_order": 605, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "silver", "rule": "time_at_most"}, {"id": "level_speed_card_7", "name": "Speed Card Level 7", "description": "", "threshold": 175, "threshold2": null, "sort_order": 606, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "silver", "rule": "time_at_most"}, {"id": "level_speed_card_8", "name": "Speed Card Level 8", "description": "", "threshold": 135, "threshold2": null, "sort_order": 607, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "silver", "rule": "time_at_most"}, {"id": "level_speed_card_9", "name": "Speed Card Level 9", "description": "", "threshold": 105, "threshold2": null, "sort_order": 608, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "silver", "rule": "time_at_most"}, {"id": "level_speed_card_10", "name": "Speed Card Level 10", "description": "", "threshold": 85, "threshold2": null, "sort_order": 609, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "silver", "rule": "time_at_most"}, {"id": "level_speed_card_11", "name": "Speed Card Level 11", "description": "", "threshold": 70, "threshold2": null, "sort_order": 610, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "gold", "rule": "time_at_most"}, {"id": "level_speed_card_12", "name": "Speed Card Level 12", "description": "", "threshold": 60.0, "threshold2": null, "sort_order": 611, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "gold", "rule": "time_at_most"}, {"id": "level_speed_card_13", "name": "Speed Card Level 13", "description": "", "threshold": 53.33, "threshold2": null, "sort_order": 612, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "gold", "rule": "time_at_most"}, {"id": "level_speed_card_14", "name": "Speed Card Level 14", "description": "", "threshold": 47.33, "threshold2": null, "sort_order": 613, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "gold", "rule": "time_at_most"}, {"id": "level_speed_card_15", "name": "Speed Card Level 15", "description": "", "threshold": 42.0, "threshold2": null, "sort_order": 614, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "gold", "rule": "time_at_most"}, {"id": "level_speed_card_16", "name": "Speed Card Level 16", "description": "", "threshold": 37.33, "threshold2": null, "sort_order": 615, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "platinum", "rule": "time_at_most"}, {"id": "level_speed_card_17", "name": "Speed Card Level 17", "description": "", "threshold": 33.33, "threshold2": null, "sort_order": 616, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "platinum", "rule": "time_at_most"}, {"id": "level_speed_card_18", "name": "Speed Card Level 18", "description": "", "threshold": 30.0, "threshold2": null, "sort_order": 617, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "platinum", "rule": "time_at_most"}, {"id": "level_speed_card_19", "name": "Speed Card Level 19", "description": "", "threshold": 27.27, "threshold2": null, "sort_order": 618, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "platinum", "rule": "time_at_most"}, {"id": "level_speed_card_20", "name": "Speed Card Level 20", "description": "", "threshold": 25.0, "threshold2": null, "sort_order": 619, "kind": "score", "event_id": "speed_card", "format_seconds": null, "tier": "platinum", "rule": "time_at_most"}, {"id": "count_speed_card_10", "name": "Speed Card · 10 attempts", "description": "10 Speed Card attempts logged", "threshold": 10, "threshold2": null, "sort_order": 620, "kind": "attempt_count", "event_id": "speed_card", "format_seconds": null, "tier": "bronze", "rule": null}, {"id": "count_speed_card_50", "name": "Speed Card · 50 attempts", "description": "50 Speed Card attempts logged", "threshold": 50, "threshold2": null, "sort_order": 621, "kind": "attempt_count", "event_id": "speed_card", "format_seconds": null, "tier": "silver", "rule": null}, {"id": "count_speed_card_100", "name": "Speed Card · 100 attempts", "description": "100 Speed Card attempts logged", "threshold": 100, "threshold2": null, "sort_order": 622, "kind": "attempt_count", "event_id": "speed_card", "format_seconds": null, "tier": "gold", "rule": null}, {"id": "level_long_card_1", "name": "Long Cards Level 1", "description": "", "threshold": 17, "threshold2": null, "sort_order": 700, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "bronze", "rule": null}, {"id": "level_long_card_2", "name": "Long Cards Level 2", "description": "", "threshold": 34, "threshold2": null, "sort_order": 701, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "bronze", "rule": null}, {"id": "level_long_card_3", "name": "Long Cards Level 3", "description": "", "threshold": 52, "threshold2": null, "sort_order": 702, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "bronze", "rule": null}, {"id": "level_long_card_4", "name": "Long Cards Level 4", "description": "", "threshold": 69, "threshold2": null, "sort_order": 703, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "bronze", "rule": null}, {"id": "level_long_card_5", "name": "Long Cards Level 5", "description": "", "threshold": 86, "threshold2": null, "sort_order": 704, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "bronze", "rule": null}, {"id": "level_long_card_6", "name": "Long Cards Level 6", "description": "", "threshold": 104, "threshold2": null, "sort_order": 705, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "silver", "rule": null}, {"id": "level_long_card_7", "name": "Long Cards Level 7", "description": "", "threshold": 121, "threshold2": null, "sort_order": 706, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "silver", "rule": null}, {"id": "level_long_card_8", "name": "Long Cards Level 8", "description": "", "threshold": 138, "threshold2": null, "sort_order": 707, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "silver", "rule": null}, {"id": "level_long_card_9", "name": "Long Cards Level 9", "description": "", "threshold": 156, "threshold2": null, "sort_order": 708, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "silver", "rule": null}, {"id": "level_long_card_10", "name": "Long Cards Level 10", "description": "", "threshold": 173, "threshold2": null, "sort_order": 709, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "silver", "rule": null}, {"id": "level_long_card_11", "name": "Long Cards Level 11", "description": "", "threshold": 190, "threshold2": null, "sort_order": 710, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "gold", "rule": null}, {"id": "level_long_card_12", "name": "Long Cards Level 12", "description": "", "threshold": 208, "threshold2": null, "sort_order": 711, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "gold", "rule": null}, {"id": "level_long_card_13", "name": "Long Cards Level 13", "description": "", "threshold": 225, "threshold2": null, "sort_order": 712, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "gold", "rule": null}, {"id": "level_long_card_14", "name": "Long Cards Level 14", "description": "", "threshold": 242, "threshold2": null, "sort_order": 713, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "gold", "rule": null}, {"id": "level_long_card_15", "name": "Long Cards Level 15", "description": "", "threshold": 260, "threshold2": null, "sort_order": 714, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "gold", "rule": null}, {"id": "level_long_card_16", "name": "Long Cards Level 16", "description": "", "threshold": 277, "threshold2": null, "sort_order": 715, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "platinum", "rule": null}, {"id": "level_long_card_17", "name": "Long Cards Level 17", "description": "", "threshold": 294, "threshold2": null, "sort_order": 716, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "platinum", "rule": null}, {"id": "level_long_card_18", "name": "Long Cards Level 18", "description": "", "threshold": 312, "threshold2": null, "sort_order": 717, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "platinum", "rule": null}, {"id": "level_long_card_19", "name": "Long Cards Level 19", "description": "", "threshold": 329, "threshold2": null, "sort_order": 718, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "platinum", "rule": null}, {"id": "level_long_card_20", "name": "Long Cards Level 20", "description": "", "threshold": 346, "threshold2": null, "sort_order": 719, "kind": "score", "event_id": "long_card", "format_seconds": 600, "tier": "platinum", "rule": null}, {"id": "count_long_card_10", "name": "Long Cards · 10 attempts", "description": "10 Long Cards attempts logged", "threshold": 10, "threshold2": null, "sort_order": 720, "kind": "attempt_count", "event_id": "long_card", "format_seconds": null, "tier": "bronze", "rule": null}, {"id": "count_long_card_50", "name": "Long Cards · 50 attempts", "description": "50 Long Cards attempts logged", "threshold": 50, "threshold2": null, "sort_order": 721, "kind": "attempt_count", "event_id": "long_card", "format_seconds": null, "tier": "silver", "rule": null}, {"id": "count_long_card_100", "name": "Long Cards · 100 attempts", "description": "100 Long Cards attempts logged", "threshold": 100, "threshold2": null, "sort_order": 722, "kind": "attempt_count", "event_id": "long_card", "format_seconds": null, "tier": "gold", "rule": null}, {"id": "level_words_1", "name": "Words Level 1", "description": "", "threshold": 5, "threshold2": null, "sort_order": 800, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_words_2", "name": "Words Level 2", "description": "", "threshold": 10, "threshold2": null, "sort_order": 801, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_words_3", "name": "Words Level 3", "description": "", "threshold": 15, "threshold2": null, "sort_order": 802, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_words_4", "name": "Words Level 4", "description": "", "threshold": 20, "threshold2": null, "sort_order": 803, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_words_5", "name": "Words Level 5", "description": "", "threshold": 25, "threshold2": null, "sort_order": 804, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_words_6", "name": "Words Level 6", "description": "", "threshold": 30, "threshold2": null, "sort_order": 805, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_words_7", "name": "Words Level 7", "description": "", "threshold": 35, "threshold2": null, "sort_order": 806, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_words_8", "name": "Words Level 8", "description": "", "threshold": 40, "threshold2": null, "sort_order": 807, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_words_9", "name": "Words Level 9", "description": "", "threshold": 45, "threshold2": null, "sort_order": 808, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_words_10", "name": "Words Level 10", "description": "", "threshold": 50, "threshold2": null, "sort_order": 809, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_words_11", "name": "Words Level 11", "description": "", "threshold": 55, "threshold2": null, "sort_order": 810, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_words_12", "name": "Words Level 12", "description": "", "threshold": 60, "threshold2": null, "sort_order": 811, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_words_13", "name": "Words Level 13", "description": "", "threshold": 65, "threshold2": null, "sort_order": 812, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_words_14", "name": "Words Level 14", "description": "", "threshold": 70, "threshold2": null, "sort_order": 813, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_words_15", "name": "Words Level 15", "description": "", "threshold": 75, "threshold2": null, "sort_order": 814, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_words_16", "name": "Words Level 16", "description": "", "threshold": 80, "threshold2": null, "sort_order": 815, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_words_17", "name": "Words Level 17", "description": "", "threshold": 85, "threshold2": null, "sort_order": 816, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_words_18", "name": "Words Level 18", "description": "", "threshold": 90, "threshold2": null, "sort_order": 817, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_words_19", "name": "Words Level 19", "description": "", "threshold": 96, "threshold2": null, "sort_order": 818, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_words_20", "name": "Words Level 20", "description": "", "threshold": 102, "threshold2": null, "sort_order": 819, "kind": "score", "event_id": "words", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "count_words_10", "name": "Words · 10 attempts", "description": "10 Words attempts logged", "threshold": 10, "threshold2": null, "sort_order": 820, "kind": "attempt_count", "event_id": "words", "format_seconds": null, "tier": "bronze", "rule": null}, {"id": "count_words_50", "name": "Words · 50 attempts", "description": "50 Words attempts logged", "threshold": 50, "threshold2": null, "sort_order": 821, "kind": "attempt_count", "event_id": "words", "format_seconds": null, "tier": "silver", "rule": null}, {"id": "count_words_100", "name": "Words · 100 attempts", "description": "100 Words attempts logged", "threshold": 100, "threshold2": null, "sort_order": 822, "kind": "attempt_count", "event_id": "words", "format_seconds": null, "tier": "gold", "rule": null}, {"id": "level_images_1", "name": "Images Level 1", "description": "", "threshold": 15, "threshold2": null, "sort_order": 900, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_images_2", "name": "Images Level 2", "description": "", "threshold": 30, "threshold2": null, "sort_order": 901, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_images_3", "name": "Images Level 3", "description": "", "threshold": 45, "threshold2": null, "sort_order": 902, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_images_4", "name": "Images Level 4", "description": "", "threshold": 60, "threshold2": null, "sort_order": 903, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_images_5", "name": "Images Level 5", "description": "", "threshold": 75, "threshold2": null, "sort_order": 904, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_images_6", "name": "Images Level 6", "description": "", "threshold": 90, "threshold2": null, "sort_order": 905, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_images_7", "name": "Images Level 7", "description": "", "threshold": 105, "threshold2": null, "sort_order": 906, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_images_8", "name": "Images Level 8", "description": "", "threshold": 120, "threshold2": null, "sort_order": 907, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_images_9", "name": "Images Level 9", "description": "", "threshold": 135, "threshold2": null, "sort_order": 908, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_images_10", "name": "Images Level 10", "description": "", "threshold": 150, "threshold2": null, "sort_order": 909, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_images_11", "name": "Images Level 11", "description": "", "threshold": 165, "threshold2": null, "sort_order": 910, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_images_12", "name": "Images Level 12", "description": "", "threshold": 180, "threshold2": null, "sort_order": 911, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_images_13", "name": "Images Level 13", "description": "", "threshold": 195, "threshold2": null, "sort_order": 912, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_images_14", "name": "Images Level 14", "description": "", "threshold": 210, "threshold2": null, "sort_order": 913, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_images_15", "name": "Images Level 15", "description": "", "threshold": 240, "threshold2": null, "sort_order": 914, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_images_16", "name": "Images Level 16", "description": "", "threshold": 270, "threshold2": null, "sort_order": 915, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_images_17", "name": "Images Level 17", "description": "", "threshold": 300, "threshold2": null, "sort_order": 916, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_images_18", "name": "Images Level 18", "description": "", "threshold": 360, "threshold2": null, "sort_order": 917, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_images_19", "name": "Images Level 19", "description": "", "threshold": 420, "threshold2": null, "sort_order": 918, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_images_20", "name": "Images Level 20", "description": "", "threshold": 480, "threshold2": null, "sort_order": 919, "kind": "score", "event_id": "images", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "count_images_10", "name": "Images · 10 attempts", "description": "10 Images attempts logged", "threshold": 10, "threshold2": null, "sort_order": 920, "kind": "attempt_count", "event_id": "images", "format_seconds": null, "tier": "bronze", "rule": null}, {"id": "count_images_50", "name": "Images · 50 attempts", "description": "50 Images attempts logged", "threshold": 50, "threshold2": null, "sort_order": 921, "kind": "attempt_count", "event_id": "images", "format_seconds": null, "tier": "silver", "rule": null}, {"id": "count_images_100", "name": "Images · 100 attempts", "description": "100 Images attempts logged", "threshold": 100, "threshold2": null, "sort_order": 922, "kind": "attempt_count", "event_id": "images", "format_seconds": null, "tier": "gold", "rule": null}, {"id": "level_dates_1", "name": "Dates Level 1", "description": "", "threshold": 4, "threshold2": null, "sort_order": 1000, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_dates_2", "name": "Dates Level 2", "description": "", "threshold": 8, "threshold2": null, "sort_order": 1001, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_dates_3", "name": "Dates Level 3", "description": "", "threshold": 12, "threshold2": null, "sort_order": 1002, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_dates_4", "name": "Dates Level 4", "description": "", "threshold": 16, "threshold2": null, "sort_order": 1003, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_dates_5", "name": "Dates Level 5", "description": "", "threshold": 20, "threshold2": null, "sort_order": 1004, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "bronze", "rule": null}, {"id": "level_dates_6", "name": "Dates Level 6", "description": "", "threshold": 24, "threshold2": null, "sort_order": 1005, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_dates_7", "name": "Dates Level 7", "description": "", "threshold": 28, "threshold2": null, "sort_order": 1006, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_dates_8", "name": "Dates Level 8", "description": "", "threshold": 32, "threshold2": null, "sort_order": 1007, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_dates_9", "name": "Dates Level 9", "description": "", "threshold": 36, "threshold2": null, "sort_order": 1008, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_dates_10", "name": "Dates Level 10", "description": "", "threshold": 40, "threshold2": null, "sort_order": 1009, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "silver", "rule": null}, {"id": "level_dates_11", "name": "Dates Level 11", "description": "", "threshold": 44, "threshold2": null, "sort_order": 1010, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_dates_12", "name": "Dates Level 12", "description": "", "threshold": 50, "threshold2": null, "sort_order": 1011, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_dates_13", "name": "Dates Level 13", "description": "", "threshold": 56, "threshold2": null, "sort_order": 1012, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_dates_14", "name": "Dates Level 14", "description": "", "threshold": 62, "threshold2": null, "sort_order": 1013, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_dates_15", "name": "Dates Level 15", "description": "", "threshold": 68, "threshold2": null, "sort_order": 1014, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "gold", "rule": null}, {"id": "level_dates_16", "name": "Dates Level 16", "description": "", "threshold": 74, "threshold2": null, "sort_order": 1015, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_dates_17", "name": "Dates Level 17", "description": "", "threshold": 80, "threshold2": null, "sort_order": 1016, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_dates_18", "name": "Dates Level 18", "description": "", "threshold": 86, "threshold2": null, "sort_order": 1017, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_dates_19", "name": "Dates Level 19", "description": "", "threshold": 92, "threshold2": null, "sort_order": 1018, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "level_dates_20", "name": "Dates Level 20", "description": "", "threshold": 98, "threshold2": null, "sort_order": 1019, "kind": "score", "event_id": "dates", "format_seconds": 300, "tier": "platinum", "rule": null}, {"id": "count_dates_10", "name": "Dates · 10 attempts", "description": "10 Dates attempts logged", "threshold": 10, "threshold2": null, "sort_order": 1020, "kind": "attempt_count", "event_id": "dates", "format_seconds": null, "tier": "bronze", "rule": null}, {"id": "count_dates_50", "name": "Dates · 50 attempts", "description": "50 Dates attempts logged", "threshold": 50, "threshold2": null, "sort_order": 1021, "kind": "attempt_count", "event_id": "dates", "format_seconds": null, "tier": "silver", "rule": null}, {"id": "count_dates_100", "name": "Dates · 100 attempts", "description": "100 Dates attempts logged", "threshold": 100, "threshold2": null, "sort_order": 1022, "kind": "attempt_count", "event_id": "dates", "format_seconds": null, "tier": "gold", "rule": null}]);
+const BADGE_UNIT = { names_faces: 'names', binary: 'digits', speed_number: 'digits', long_number: 'digits', spoken: 'digits', speed_card: 'cards', long_card: 'cards', words: 'words', images: 'images', dates: 'dates' };
+const badgeTime = (t) => (t >= 60 ? fmtTime(t) : `${trimNum(t, 2)} s`);
+function badgeDesc(b) {
+  const ev = b.event_id && (state.eventsById[b.event_id] || EVENT_SEED.find((e) => e.id === b.event_id));
+  if (b.kind === 'score' && ev) {
+    if (b.rule === 'cards_correct') return `${trimNum(b.threshold)}+ cards correct in a 52-card attempt`;
+    if (b.rule === 'time_at_most' || ev.result_kind === 'time') return b.threshold === 300 ? '52/52 within 5:00' : `52/52 in ${badgeTime(b.threshold)} or faster`;
+    if (ev.result_kind === 'count_at_interval') return `${trimNum(b.threshold)}+ digits at ${trimNum(b.threshold2 ?? 1, 2)} s per digit or faster`;
+    const decks = ev.id === 'long_card' && b.threshold % 52 === 0 ? ` (${b.threshold / 52} deck${b.threshold > 52 ? 's' : ''})` : '';
+    return `${trimNum(b.threshold)}+ ${BADGE_UNIT[ev.id] || 'items'}${decks}${b.format_seconds ? ' in ' + (b.format_seconds / 60) + ' min' : ''}`;
+  }
+  if (b.kind === 'attempt_count' && ev) return `${trimNum(b.threshold)} ${ev.name} attempts logged`;
+  if (b.kind === 'first_attempt' && ev) return `Log your first ${ev.name} attempt`;
+  return b.description.replace('{t2}', trimNum(b.threshold2, 2)).replace('{t}', trimNum(b.threshold, 2));
+}
+const TIER_RANK = { bronze: 1, silver: 2, gold: 3, platinum: 4 };
 const chrono = (x, y) => x.practiced_on.localeCompare(y.practiced_on) || (x.logged_at || '').localeCompare(y.logged_at || '');
 const attemptById = (id) => state.attemptsById[id];
 function hashStr(s) { let h = 7; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); }
@@ -753,11 +818,14 @@ function buildFeed() {
     }
   }
   const defs = Object.fromEntries(state.badges.map((b) => [b.id, b]));
+  const groups = {};
   for (const b of state.athleteBadges) {
     const p = state.profilesById[b.athlete_id];
     if (!p || !p.active || b.earned_on < since || !defs[b.badge_id]) continue;
-    items.push({ type: 'badge', athlete_id: b.athlete_id, badge: defs[b.badge_id], day: b.earned_on, at: b.created_at || '' });
+    const g = (groups[b.athlete_id + '|' + b.earned_on] ||= { type: 'badge', athlete_id: b.athlete_id, badges: [], day: b.earned_on, at: '' });
+    g.badges.push(defs[b.badge_id]); if ((b.created_at || '') > g.at) g.at = b.created_at || '';
   }
+  for (const g of Object.values(groups)) { g.badges.sort((x, y) => (TIER_RANK[y.tier] || 5) - (TIER_RANK[x.tier] || 5) || y.sort_order - x.sort_order); items.push(g); }
   items.sort((x, y) => y.day.localeCompare(x.day) || y.at.localeCompare(x.at));
   return (state.memo.feed = items.slice(0, 25));
 }
@@ -768,21 +836,46 @@ function levelFor(xp) {
   const cur = 50 * n * (n - 1), next = 50 * (n + 1) * n;
   return { level: n, xp, cur, next, pct: ((xp - cur) / (next - cur)) * 100 };
 }
+/* XP classes (team rules, Oct 2026):
+   'std'    – the event's standard format: 5 min (most events), 10 min Long Cards, 15 min Long Numbers,
+              Speed Card 52 cards (finished or not), Spoken at 1 s per digit or faster → 10 XP, max 5 per event per day
+   'oneMin' – 1 min Binary, Speed Number, Words, Images → 5 XP, max 2 per event per day
+   null     – everything else earns no XP */
+const XP_ONE_MIN_EVENTS = ['binary', 'speed_number', 'words', 'images'];
+const STD_SECONDS = { long_card: 600, long_number: 900 };
+function xpClass(a) {
+  const f = state.formatsById[a.format_id]; if (!f) return null;
+  if (a.event_id === 'spoken') return (a.interval_seconds ?? f.interval_seconds ?? 99) <= 1 ? 'std' : null;
+  if (a.event_id === 'speed_card') return f.is_standard ? 'std' : null;
+  if (f.mem_seconds === (STD_SECONDS[a.event_id] ?? 300)) return 'std';
+  if (f.mem_seconds === 60 && XP_ONE_MIN_EVENTS.includes(a.event_id)) return 'oneMin';
+  return null;
+}
 function xpOf(athleteId, range) {
   const key = 'xp:' + athleteId + (range ? range.join() : ''); if (state.memo[key]) return state.memo[key];
-  const ach = achievementsOf(athleteId); const cap = {};
-  const parts = { attempts: 0, eotw: 0, pb: 0, target: 0, errors: 0, quests: 0 };
+  const cap = {};
+  const parts = { standard: 0, oneMin: 0, eotw: 0, errors: 0, quests: 0 };
   for (const a of attemptsOf(athleteId).slice().sort(chrono)) {
     if (!perf(a)) continue;
-    const k = a.practiced_on + '|' + a.event_id; cap[k] = (cap[k] || 0) + 1;
+    const cls = xpClass(a); if (!cls) continue;
+    const k = a.practiced_on + '|' + a.event_id + '|' + cls; cap[k] = (cap[k] || 0) + 1;
+    if (cap[k] > (cls === 'std' ? 5 : 2)) continue;
     if (range && !inRange(a.practiced_on, range)) continue;
-    if (cap[k] <= 5) { parts.attempts += 10; if (eventOfWeek(weekStart(a.practiced_on)).id === a.event_id) parts.eotw += 10; }
-    if (ach.pb.has(a.id)) parts.pb += 25;
-    if (ach.target.has(a.id)) parts.target += 15;
+    if (cls === 'std') { parts.standard += 10; if (eventOfWeek(weekStart(a.practiced_on)).id === a.event_id) parts.eotw += 10; }
+    else parts.oneMin += 5;
     if (a.error_count > 0) parts.errors += 5;
   }
   parts.quests = state.quests.filter((q) => q.athlete_id === athleteId && (!range || inRange(q.day, range))).length * 10;
-  const xp = Object.values(parts).reduce((s, v) => s + v, 0);
+  parts.pool = 0;
+  const mine = attemptsOf(athleteId);
+  if (mine.length) {
+    const first = weekStart(mine.reduce((m, a) => (a.practiced_on < m ? a.practiced_on : m), mine[0].practiced_on));
+    for (let ws = first; addDays(ws, 6) < TODAY(); ws = addDays(ws, 7)) {
+      if (range && !inRange(addDays(ws, 6), range)) continue;
+      const t = weekTarget(ws); if (t.reached) parts.pool += t.shares[athleteId] || 0;
+    }
+  }
+  const xp = Object.values(parts).reduce((t, v) => t + v, 0);
   return (state.memo[key] = { ...levelFor(xp), parts });
 }
 
@@ -807,14 +900,13 @@ function fixedItems(athleteId, days) {
 }
 function computeBadges(athleteId) {
   const defs = Object.fromEntries(state.badges.map((b) => [b.id, b]));
-  const list = attemptsOf(athleteId).filter(perf).slice().sort(chrono);
+  const list = attemptsOf(athleteId).filter((a) => perf(a) && a.status !== 'pending_review').slice().sort(chrono);
   const out = [];
   const add = (id, day, aid) => { if (defs[id] && !out.some((o) => o.badge_id === id)) out.push({ badge_id: id, earned_on: day, attempt_id: aid || null }); };
   const run = {};
   for (const a of list) {
     if (a.event_id === 'speed_card' && a.items_total >= 52 && isFull(a)) {
       add('first_deck', a.practiced_on, a.id);
-      for (const id of ['speed_card_t1', 'speed_card_t2', 'speed_card_t3']) if (defs[id] && a.time_seconds != null && a.time_seconds < defs[id].threshold) add(id, a.practiced_on, a.id);
     }
     if (a.event_id === 'spoken' && defs.fast_ears && a.items_correct >= defs.fast_ears.threshold && a.interval_seconds != null && a.interval_seconds <= (defs.fast_ears.threshold2 ?? 1)) add('fast_ears', a.practiced_on, a.id);
     if (defs.perfect_ten && a.items_total != null) {
@@ -822,17 +914,9 @@ function computeBadges(athleteId) {
       if (run[a.format_id] >= defs.perfect_ten.threshold) add('perfect_ten', a.practiced_on, a.id);
     }
   }
-  const days = [...new Set(attemptsOf(athleteId).filter(effortOk).map((a) => a.practiced_on))].sort();
-  if (days.length) {
-    const set = new Set(days); const today = TODAY(); let streak = 0, fr = 0;
-    for (let d = days[0]; d <= today; d = addDays(d, 1)) {
-      if (set.has(d)) {
-        streak++; if (streak % 7 === 0) fr = Math.min(2, fr + 1);
-        for (const id of ['streak_7', 'streak_30', 'streak_100']) if (defs[id] && streak >= defs[id].threshold) add(id, d);
-      } else if (d < today && streak > 0) { if (fr > 0) fr--; else streak = 0; }
-    }
-    if (defs.comeback) for (let i = 1; i < days.length; i++) if (diffDays(days[i - 1], days[i]) - 1 >= defs.comeback.threshold) { add('comeback', days[i]); break; }
-  }
+  walkStreak(new Set(attemptsOf(athleteId).filter(effortOk).map((a) => a.practiced_on)), TODAY(), (d, streak) => {
+    for (const id of ['streak_7', 'streak_30', 'streak_100']) if (defs[id] && streak >= defs[id].threshold) add(id, d);
+  });
   if (defs.decathlete) {
     const wk = {};
     for (const a of attemptsOf(athleteId).filter(effortOk).slice().sort(chrono)) {
@@ -845,40 +929,57 @@ function computeBadges(athleteId) {
     for (const a of attemptsOf(athleteId).slice().sort(chrono)) { c += a.error_count || 0; if (c >= defs.bug_hunter.threshold) { add('bug_hunter', a.practiced_on, a.id); break; } }
   }
   if (defs.fixed_it && fixedItems(athleteId, defs.fixed_it.threshold).length) add('fixed_it', TODAY());
+  // Event ladders: first attempt, attempt counts, and score benchmarks
+  const byEvent = {}; for (const a of attemptsOf(athleteId).filter(effortOk).slice().sort(chrono)) (byEvent[a.event_id] ||= []).push(a);
+  for (const b of state.badges) {
+    if (!b.kind || b.kind === 'special' || !b.event_id) continue;
+    const list = byEvent[b.event_id] || []; if (!list.length) continue;
+    if (b.kind === 'first_attempt') { add(b.id, list[0].practiced_on, list[0].id); continue; }
+    if (b.kind === 'attempt_count') { const n = Math.round(b.threshold); if (list.length >= n) add(b.id, list[n - 1].practiced_on, list[n - 1].id); continue; }
+    const kind = kindOf(b.event_id);
+    const hit = list.find((a) => {
+      if (!perf(a) || a.status === 'pending_review') return false;  // flagged results earn levels only once verified
+      if (kind === 'time') {
+        if (!(a.items_total >= 52)) return false;
+        if (b.rule === 'cards_correct') return (a.items_correct ?? 0) >= b.threshold;
+        return isFull(a) && a.time_seconds != null && a.time_seconds <= b.threshold + 1e-9;
+      }
+      if (kind === 'count_at_interval') return a.interval_seconds != null && a.interval_seconds <= (b.threshold2 ?? 1) && (a.items_correct ?? 0) >= b.threshold;
+      if (b.format_seconds && state.formatsById[a.format_id]?.mem_seconds !== b.format_seconds) return false;
+      const m = metric(a); return m != null && m >= b.threshold;
+    });
+    if (hit) add(b.id, hit.practiced_on, hit.id);
+  }
   return out;
 }
 
-/* Daily quest (design doc §8.6): one per athlete per day, chosen deterministically */
-const QUEST_LABEL = { log_any: 'Log an attempt in any event', neglected: 'Log an event you haven’t trained in 7 days', beat_accuracy: 'Beat yesterday’s accuracy', drill5: 'Drill 5 of your trouble items' };
+/* Daily quest: one team quest per day, the same for everyone – log an XP-earning attempt in a discipline picked at random for that date */
+const QUEST_LABEL = { discipline_of_day: 'Team quest', log_any: 'Log an attempt in any event', neglected: 'Log an event you haven’t trained in 7 days', beat_accuracy: 'Beat yesterday’s accuracy' };
+const WEEKEND_ONLY_QUEST = ['long_number', 'long_card'];  // too long for a weekday quest
+/* Shuffled rotation: weekdays cycle through the 8 shorter disciplines, weekends through all 10.
+   Each cycle is a fresh shuffle, so every discipline comes up once per cycle. Same for everyone on a given date. */
+function seededShuffle(list, seed) {
+  const a = list.slice(); let h = hashStr(seed) || 1;
+  const rnd = () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return ((h >>> 0) % 100000) / 100000; };
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+function questEvent(day = TODAY()) {
+  const all = state.events.length ? state.events : EVENT_SEED;
+  const n = diffDays(ROTATION_ANCHOR, day); const week = Math.floor(n / 7), dow = ((n % 7) + 7) % 7;   // anchor is a Monday
+  const weekend = dow >= 5;
+  const pool = weekend ? all : all.filter((e) => !WEEKEND_ONLY_QUEST.includes(e.id));
+  const idx = weekend ? week * 2 + (dow - 5) : week * 5 + dow;    // position among weekend days or among weekdays
+  const cycle = Math.floor(idx / pool.length);
+  return seededShuffle(pool, (weekend ? 'we|' : 'wd|') + cycle)[idx % pool.length];
+}
+const questDoneBy = (athleteId, ev, day) => attemptsOf(athleteId).some((a) => a.practiced_on === day && a.event_id === ev.id && perf(a) && xpClass(a));
 function questFor(athleteId) {
   const key = 'q:' + athleteId; if (state.memo[key]) return state.memo[key];
-  const today = TODAY(), y = addDays(today, -1);
-  const mine = attemptsOf(athleteId).filter(effortOk); const before = mine.filter((a) => a.practiced_on < today);
-  const stored = state.quests.find((q) => q.athlete_id === athleteId && q.day === today);
-  const cands = [];
-  const trained = new Set(before.map((a) => a.event_id));
-  const recent = new Set(before.filter((a) => a.practiced_on >= addDays(today, -7)).map((a) => a.event_id));
-  const neg = state.events.filter((e) => trained.has(e.id) && !recent.has(e.id));
-  if (neg.length) {
-    const e = neg[hashStr(athleteId + today) % neg.length];
-    cands.push({ id: 'neglected', eventId: e.id, text: `Log ${e.name}. You haven’t trained it in 7 days.`, done: mine.some((a) => a.practiced_on === today && a.event_id === e.id) });
-  }
-  const yl = before.filter((a) => a.practiced_on === y && a.items_total > 0 && a.items_correct != null && perf(a));
-  if (yl.length) {
-    const cnt = {}; for (const a of yl) cnt[a.event_id] = (cnt[a.event_id] || 0) + 1;
-    const ev = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0];
-    const acc = yl.filter((a) => a.event_id === ev).reduce((s, a) => s + a.items_correct / a.items_total, 0) / cnt[ev];
-    if (acc < 1) cands.push({ id: 'beat_accuracy', eventId: ev, text: `Beat yesterday’s ${state.eventsById[ev].name} accuracy of ${Math.round(acc * 100)}%.`, done: mine.some((a) => a.practiced_on === today && a.event_id === ev && perf(a) && a.items_total > 0 && a.items_correct / a.items_total > acc) });
-  }
-  if (athleteId === state.me?.id) {
-    const codes = new Set();
-    for (const e of state.errors) { const a = attemptById(e.attempt_id); if (a && a.athlete_id === athleteId && a.practiced_on < today && a.practiced_on >= addDays(today, -30)) codes.add(e.item_code); }
-    if (codes.size >= 5) cands.push({ id: 'drill5', text: 'Drill 5 of your trouble items.', done: state.drills.filter((d) => d.athlete_id === athleteId && d.day === today).length >= 5 });
-  }
-  cands.push({ id: 'log_any', text: 'Log an attempt in any event.', done: mine.some((a) => a.practiced_on === today) });
-  let q;
-  if (stored) q = { ...(cands.find((c) => c.id === stored.quest_id) || { id: stored.quest_id, text: QUEST_LABEL[stored.quest_id] || 'Daily quest' }), done: true };
-  else q = cands[hashStr(athleteId + '|' + today) % cands.length];
+  const today = TODAY(); const ev = questEvent(today);
+  const stored = state.quests.some((q) => q.athlete_id === athleteId && q.day === today);
+  const teamDone = state.profiles.filter((p) => p.active && questDoneBy(p.id, ev, today)).length;
+  const q = { id: 'discipline_of_day', eventId: ev.id, text: `Log ${ev.name} today`, done: stored || questDoneBy(athleteId, ev, today), teamDone };
   return (state.memo[key] = q);
 }
 
@@ -1015,13 +1116,44 @@ function nextSeason(today = TODAY()) { return state.seasons.find((s) => s.starts
 const ROTATION_ANCHOR = '2024-01-01'; // a Monday
 function eventOfWeek(ws) {
   const pick = state.weeklyEvents.find((w) => w.week_start === ws);
-  if (pick && state.eventsById[pick.event_id]) return { ...state.eventsById[pick.event_id], picked: true };
-  const evs = state.events.length ? state.events : EVENT_SEED;
+  if (pick && state.eventsById[pick.event_id] && pick.event_id !== 'long_card' && pick.event_id !== 'long_number') return { ...state.eventsById[pick.event_id], picked: true };
+  const evs = eotwPool();
   const i = Math.floor(diffDays(ROTATION_ANCHOR, ws) / 7);
   return { ...evs[((i % evs.length) + evs.length) % evs.length], picked: false };
 }
+/* Event of the week never uses the long disciplines (Long Cards 10 min, Long Numbers 15 min) */
+function eotwPool() { return (state.events.length ? state.events : EVENT_SEED).filter((e) => e.id !== 'long_card' && e.id !== 'long_number'); }
 
-/* Weekly team goal: attempts by active athletes this week, capped at 5 per athlete per event per day */
+/* Event of the week team target and XP pool (team rules, Oct 2026)
+   - Target type: correct items or attempts, in a shuffled rotation; an admin can override a week.
+   - Size scales with active athletes (anyone who logged in the 4 weeks up to the end of that week, or today).
+   - Counts standard-format attempts in the event of the week, Monday to Sunday. Rejected and "didn't finish" don't count.
+   - If the team reaches the target, the pool is split in proportion to each person's contribution once the week ends. */
+function weekTarget(ws) {
+  const key = 'wt:' + ws; if (state.memo[key]) return state.memo[key];
+  const today = TODAY(); const we = addDays(ws, 6); const until = we < today ? we : today;
+  const ev = eventOfWeek(ws);
+  const pick = state.weeklyEvents.find((w) => w.week_start === ws);
+  const idx = Math.floor(diffDays(ROTATION_ANCHOR, ws) / 7);
+  const type = (pick && pick.target_type) || seededShuffle(['items', 'attempts'], 'pool|' + Math.floor(idx / 2))[((idx % 2) + 2) % 2];
+  const active = state.profiles.filter((p) => p.active && attemptsOf(p.id).some((a) => effortOk(a) && inRange(a.practiced_on, [addDays(ws, -28), until]))).length;
+  const n = Math.max(1, active);
+  const per = type === 'items' ? (state.settings['pool_items_' + ev.id] ?? 100) : state.settings.pool_attempts_per_athlete;
+  const target = Math.max(1, Math.round(per * n)); const pool = Math.round(state.settings.pool_xp_per_athlete * n);
+  const contrib = {}; let total = 0;
+  for (const p of state.profiles) {
+    for (const a of attemptsOf(p.id)) {
+      if (a.event_id !== ev.id || !perf(a) || !inRange(a.practiced_on, [ws, we]) || xpClass(a) !== 'std') continue;
+      const v = type === 'items' ? (a.items_correct || 0) : 1; if (!v) continue;
+      contrib[p.id] = (contrib[p.id] || 0) + v; total += v;
+    }
+  }
+  const reached = total >= target; const shares = {};
+  if (reached) for (const [id, v] of Object.entries(contrib)) shares[id] = Math.floor((pool * v) / total);
+  const unit = type === 'items' ? (BADGE_UNIT[ev.id] || 'items') : 'attempts';
+  return (state.memo[key] = { ws, we, ev, type, unit, target, pool, active: n, contrib, total, reached, ended: we < today, shares });
+}
+/* Weekly team goal (v3, replaced by the team target above) */
 function teamGoal() {
   if (state.memo.goal) return state.memo.goal;
   const range = periodRange('week'); const per = {}; let total = 0;
@@ -1131,7 +1263,7 @@ function targetsCSV() {
 }
 function athletesCSV() {
   return toCSV([['initials', (p) => p.initials], ['display_name', (p) => p.display_name], ['role', (p) => p.role], ['active', (p) => (p.active ? 'yes' : 'no')],
-    ['joined_on', (p) => p.joined_on], ['level', (p) => xpOf(p.id).level], ['xp', (p) => xpOf(p.id).xp], ['current_streak', (p) => streakInfo(p.id).streak],
+    ['joined_on', (p) => p.joined_on], ['rank', (p) => xpOf(p.id).level], ['xp', (p) => xpOf(p.id).xp], ['current_streak', (p) => streakInfo(p.id).streak],
     ['badges', (p) => state.athleteBadges.filter((b) => b.athlete_id === p.id).map((b) => state.badges.find((x) => x.id === b.badge_id)?.name).filter(Boolean).join('; ')]], state.profiles);
 }
 </script>
@@ -1156,7 +1288,7 @@ function loadScript(src) {
 }
 
 /* ---------------- Demo store ---------------- */
-const DEMO_KEY = 'teamsg-demo-v3', DEMO_USER = 'teamsg-demo-user';
+const DEMO_KEY = 'teamsg-demo-v12', DEMO_USER = 'teamsg-demo-user';
 function parseTargetValue(v) {
   const s = String(v).replace(/[<>~]/g, '').trim();
   const t = parseTimeInput(s);
@@ -1179,7 +1311,14 @@ function buildDemoDb() {
       const std = formats.find((f) => f.event_id === 'spoken' && f.is_standard && Number(f.interval_seconds) === Number(iv));
       if (std) { p.interval_seconds = iv; return std.id; }
     }
-    if (ev.result_kind === 'count' && p.items_total == null) return stdOf(ev.id).id;
+    if (ev.result_kind === 'count' && p.items_total == null) {
+      // The sheet's 15-min Number and 10-min Card columns match those timed formats; other columns don't record a timing
+      if (ev.id === 'long_number') return formats.find((f) => f.event_id === ev.id && f.name === '15 min').id;
+      if (ev.id === 'long_card') return formats.find((f) => f.event_id === ev.id && f.name === '10 min').id;
+      const key = ev.id + '|sheet';
+      if (!drills[key]) { const f = { id: uuid(), event_id: ev.id, name: 'From sheet (timing not recorded)', is_standard: false, item_count: null, mem_seconds: null, interval_seconds: null, created_by: adminId, created_at: now }; formats.push(f); drills[key] = f.id; }
+      return drills[key];
+    }
     const key = `${ev.id}|${p.items_total ?? ''}|${ev.id === 'spoken' ? (p.interval_seconds ?? '') : ''}`;
     if (!drills[key]) {
       const f = { id: uuid(), event_id: ev.id, name: drillName(ev.id, p.items_total, ev.id === 'spoken' ? p.interval_seconds : null), is_standard: false, item_count: p.items_total ?? null, mem_seconds: null, interval_seconds: ev.id === 'spoken' ? (p.interval_seconds ?? null) : null, created_by: adminId, created_at: now };
@@ -1301,6 +1440,7 @@ class DemoStore {
     this.audit('attempts', id, 'UPDATE', before, { ...a }); this.save(); return { ...a };
   }
   async deleteAttempt(id) {
+    if (!this.admin()) throw new Error('Attempts can’t be deleted. Ask an admin to reject it instead.');
     const i = this.db.attempts.findIndex((x) => x.id === id); if (i < 0) return;
     const before = this.db.attempts[i];
     this.db.attempts.splice(i, 1);
@@ -1480,15 +1620,15 @@ Object.assign(SupabaseStore.prototype, {
 Object.assign(DemoStore.prototype, {
   async saveSeason(row) { const r = { id: uuid(), ...row, created_by: this.uid, created_at: new Date().toISOString() }; this.db.seasons.push(r); this.audit('seasons', r.id, 'INSERT', null, r); this.save(); },
   async deleteSeason(id) { const r = this.db.seasons.find((x) => x.id === id); this.db.seasons = this.db.seasons.filter((x) => x.id !== id); this.audit('seasons', id, 'DELETE', r, null); this.save(); },
-  async setWeeklyEvent(weekStart, eventId) { this.db.weekly_events = this.db.weekly_events.filter((w) => w.week_start !== weekStart); if (eventId) this.db.weekly_events.push({ week_start: weekStart, event_id: eventId, set_by: this.uid }); this.save(); },
+  async setWeeklyPick(weekStart, row) { this.db.weekly_events = this.db.weekly_events.filter((w) => w.week_start !== weekStart); if (row) this.db.weekly_events.push({ week_start: weekStart, ...row, set_by: this.uid }); this.save(); },
   async addCoachNote(row) { const r = { id: uuid(), ...row, author_id: this.uid, created_at: new Date().toISOString() }; this.db.coach_notes.push(r); this.save(); },
   async deleteCoachNote(id) { this.db.coach_notes = this.db.coach_notes.filter((x) => x.id !== id); this.save(); }
 });
 Object.assign(SupabaseStore.prototype, {
   async saveSeason(row) { this.check(await this.sb.from('seasons').insert(row)); },
   async deleteSeason(id) { this.check(await this.sb.from('seasons').delete().eq('id', id)); },
-  async setWeeklyEvent(weekStart, eventId) {
-    if (eventId) this.check(await this.sb.from('weekly_events').upsert({ week_start: weekStart, event_id: eventId }));
+  async setWeeklyPick(weekStart, row) {
+    if (row) this.check(await this.sb.from('weekly_events').upsert({ week_start: weekStart, ...row }));
     else this.check(await this.sb.from('weekly_events').delete().eq('week_start', weekStart));
   },
   async addCoachNote(row) { this.check(await this.sb.from('coach_notes').insert(row)); },
@@ -1500,8 +1640,8 @@ Object.assign(SupabaseStore.prototype, {
 /* ---------------- UI state ---------------- */
 const ui = {
   route: 'today', param: null, logPreset: null, stack: [], expectHash: null, needsPassword: false, fatal: null, loginView: 'signin', loginMsg: '',
-  boards: { period: 'week', mode: 'raw', eventId: 'speed_card', formatId: null, pctEvent: 'overall', impEvent: 'overall' },
-  progress: { athleteId: null, eventId: null, formatId: null, range: 30, calMonth: null, limit: 20 },
+  boards: { period: 'month', mode: 'raw', eventId: 'speed_card', formatId: null, pctEvent: 'overall', impEvent: 'overall' },
+  progress: { athleteId: null, eventId: null, formatId: null, range: 30, calMonth: null, limit: 20, calOpen: false },
   log: null,
   admin: { tab: 'review', audit: null, tgEvent: 'speed_card', tgAthlete: null, fmEvent: 'speed_card' }
 };
@@ -1624,18 +1764,25 @@ function viewToday() {
       <div class="bar" role="img" aria-label="${Math.round(pct)}% of target"><span style="width:${Math.min(100, pct)}%"></span></div>
       <div class="tiny muted">${Math.round(pct)}% of target · best this month on ${fmtShort(b.practiced_on)}</div></div>`).join('')
     + (idle.length ? `<p class="tiny muted" style="margin:10px 0 0">No attempts this month in the target format for ${esc(idle.map((x) => x.e.name).join(', '))}.</p>` : '');
-  const questLink = q.done ? '' : q.id === 'drill5' ? '#/trouble' : '#/log';
   const se = currentSeason(); const nx = !se && nextSeason();
   const seasonLine = se ? `<br><b style="color:var(--hero-ink)">${esc(se.name)}</b> · ${diffDays(today, se.competition_on) === 0 ? 'competition day' : diffDays(today, se.competition_on) + ' days to go'}`
     : nx ? `<br>${esc(nx.name)} starts in ${diffDays(today, nx.starts_on)} days` : '';
-  const eo = eventOfWeek(weekStart(today)); const tg2 = teamGoal();
+  const eo = eventOfWeek(weekStart(today)); const tt = weekTarget(weekStart(today));
+  const fmtN = (n) => Number(n).toLocaleString('en-SG');
+  const myC = tt.contrib[me.id] || 0; const myPct = tt.total ? Math.round((myC / tt.total) * 100) : 0;
   const weekCard = `<section class="section"><div class="card stack" style="gap:14px">
       <div style="display:flex;gap:12px;align-items:center"><div class="eotw" aria-hidden="true">2×</div>
-        <div class="grow"><div style="font-weight:700">Event of the week: ${esc(eo.name)}</div><div class="small muted">Double XP for ${esc(eo.name)} attempts until Sunday.</div></div>
+        <div class="grow"><div style="font-weight:700">Event of the week: ${esc(eo.name)}</div><div class="small muted">Double XP for ${esc(eo.name)} attempts in the standard format until Sunday.</div></div>
         <button type="button" class="btn sm" data-act="log-preset" data-id="${esc(eo.id)}">Log</button></div>
-      <div class="stack" style="gap:6px"><div class="row-between"><span style="font-weight:700">Team goal this week</span><span class="num" style="font-size:19px">${tg2.total} / ${tg2.goal}</span></div>
-        <div class="bar" role="img" aria-label="${tg2.total} of ${tg2.goal} team attempts"><span style="width:${tg2.pct.toFixed(1)}%"></span></div>
-        <div class="tiny muted">${tg2.total >= tg2.goal ? 'Goal reached. Nice work, team.' : `${tg2.goal - tg2.total} attempts to go`} · you’ve added ${tg2.mine}${tg2.top.length ? ' · most: ' + tg2.top.map(([id, n]) => `${esc(initialsOf(id))} ${n}`).join(', ') : ''}</div></div>
+      <div class="stack" style="gap:6px"><div class="row-between" style="align-items:center"><span style="font-weight:700">Team target ${infoBtn('pool')}</span><span class="num" style="font-size:19px">${fmtN(tt.total)} / ${fmtN(tt.target)}</span></div>
+        <div class="bar" role="img" aria-label="${tt.total} of ${tt.target} ${esc(tt.unit)}"><span style="width:${Math.min(100, (tt.total / tt.target) * 100).toFixed(1)}%"></span></div>
+        <div class="tiny muted">${tt.type === 'items' ? `Correct ${esc(tt.unit)}` : 'Attempts'} in ${esc(eo.name)} · pool ${fmtN(tt.pool)} XP · ${tt.reached ? 'reached! Shared out after Sunday.' : `${fmtN(tt.target - tt.total)} to go`} · you: ${fmtN(myC)}${tt.total ? ` (${myPct}%)` : ''}</div>
+        <div id="info-pool" class="info-panel" hidden><ul>
+          <li>Each week the team has a target in the event of the week: either correct ${esc(BADGE_UNIT[eo.id] || 'items')} or number of attempts.</li>
+          <li>The target and the pool grow with the number of active athletes (${tt.active} this week).</li>
+          <li>Only attempts in the standard format count.</li>
+          <li>If the team reaches the target by Sunday, the ${fmtN(tt.pool)} XP pool is shared in proportion to what each person contributed.</li>
+          <li>This is on top of the double XP per attempt.</li></ul></div></div>
     </div></section>`;
   const notes = recentNotesForMe();
   const notesHtml = notes.length ? `<section class="section"><div class="card stack" style="gap:8px;border-left:4px solid var(--gold)"><h2>Coach note${notes.length > 1 ? 's' : ''}</h2>
@@ -1654,9 +1801,10 @@ function viewToday() {
   const feed = buildFeed();
   const feedHtml = feed.length ? feed.map((it) => {
     if (it.type === 'badge') {
+      const top = it.badges[0]; const more = it.badges.length - 1;
       return `<div class="list-row"><a class="avatar sm" href="#/profile/${esc(it.athlete_id)}" aria-label="${esc(nameOf(it.athlete_id))}’s profile">${esc(initialsOf(it.athlete_id))}</a>
-        <div class="grow"><div><b>${esc(nameOf(it.athlete_id))}</b> earned the <b>${esc(it.badge.name)}</b> badge</div>
-        <div class="tiny muted" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:3px"><span class="tag gold">Badge</span><span>${esc(badgeDesc(it.badge))}</span><span>· ${esc(fmtShort(it.day))}</span></div></div></div>`;
+        <div class="grow"><div><b>${esc(nameOf(it.athlete_id))}</b> earned <b>${esc(top.name)}</b>${more ? ` and ${more} other badge${more > 1 ? 's' : ''}` : ''}</div>
+        <div class="tiny muted" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:3px"><span class="tag tier-${esc(top.tier || 'gold')}">${esc(top.tier ? top.tier[0].toUpperCase() + top.tier.slice(1) : 'Badge')}</span><span>${esc(badgeDesc(top))}</span><span>· ${esc(fmtShort(it.day))}</span></div></div></div>`;
     }
     const { a, isPB, targetHit } = it; const ev = evOf(a); const f = state.formatsById[a.format_id];
     const what = isPB ? `set a personal best in ${ev.name}: ${fmtMetricValue(a.event_id, metric(a))}` : `hit their ${ev.name} target: ${fmtMetricValue(a.event_id, metric(a))}`;
@@ -1671,17 +1819,22 @@ function viewToday() {
       <div style="display:flex;align-items:flex-end;gap:14px">
         <div class="streak-num" aria-hidden="true">${st.streak}</div>
         <div class="stack" style="gap:4px;padding-bottom:4px"><h1 style="font-size:19px">day streak<span class="sr">: ${st.streak}</span></h1>
-        <div class="meta" style="display:flex;align-items:center;gap:6px;color:var(--hero-muted)"><span style="color:var(--gold)">${ICONS.freeze}</span>${st.freezes} freeze${st.freezes === 1 ? '' : 's'} saved</div></div>
+        <div class="meta" style="display:flex;align-items:center;gap:6px;color:var(--hero-muted)"><span style="color:var(--gold)">${ICONS.freeze}</span>${st.freezes} freeze${st.freezes === 1 ? '' : 's'} saved ${infoBtn('freeze')}</div></div>
       </div>
+      <div id="info-freeze" class="info-panel" hidden><ul>
+        <li>A freeze keeps your streak alive on a day you don’t log anything. It’s used automatically.</li>
+        <li>Everyone starts with 2.</li>
+        <li>Every 30 days in a row that you log earns 1 back, up to 2.</li>
+        <li>With no freezes left, a missed day resets your streak to 0.</li></ul></div>
       <div style="font-size:15px">${esc(msg)}</div>
       <a href="#/profile" class="stack" style="gap:6px;color:var(--hero-ink);text-decoration:none">
-        <div class="row-between small"><span><b>Level ${lv.level}</b></span><span style="color:var(--hero-muted)">${lv.xp} / ${lv.next} XP</span></div>
-        <div class="bar" role="img" aria-label="Level ${lv.level}, ${lv.xp} of ${lv.next} XP"><span style="width:${Math.min(100, lv.pct).toFixed(1)}%"></span></div></a>
+        <div class="row-between small"><span><b>Rank ${lv.level}</b></span><span style="color:var(--hero-muted)">${lv.xp} / ${lv.next} XP</span></div>
+        <div class="bar" role="img" aria-label="Rank ${lv.level}, ${lv.xp} of ${lv.next} XP"><span style="width:${Math.min(100, lv.pct).toFixed(1)}%"></span></div></a>
     </header>
     <section class="section"><div class="card" style="display:flex;gap:12px;align-items:center">
       <div style="width:40px;height:40px;flex:none;border-radius:8px;display:flex;align-items:center;justify-content:center;background:${q.done ? 'var(--green)' : 'var(--green-soft)'};color:${q.done ? 'var(--on-green)' : 'var(--green)'}">${q.done ? ICONS.check : ICONS.quest}</div>
-      <div class="grow"><div style="font-weight:700">Today’s quest</div><div class="small muted">${esc(q.text)}</div></div>
-      ${q.done ? '<span class="tag target">+10 XP</span>' : `<a class="btn sm" href="${questLink}">Go</a>`}</div></section>
+      <div class="grow"><div style="font-weight:700">Today’s quest</div><div class="small muted">${esc(q.text)}</div><div class="tiny muted">${q.teamDone} done today</div></div>
+      ${q.done ? '<span class="tag target">+10 XP</span>' : `<button type="button" class="btn sm" data-act="log-preset" data-id="${esc(q.eventId)}">Go</button>`}</div></section>
     ${notesHtml}${unreadHtml}${recapHtml}${weekCard}${rivalHtml}
     <section class="section"><div class="row-between"><h2>Progress to target</h2><a class="small" href="#/progress">My progress</a></div>
       ${tData.length ? tRows : '<div class="empty" style="margin-top:10px">No targets set yet. Your admin sets them.</div>'}</section>
@@ -1692,7 +1845,7 @@ function viewToday() {
 
 /* ---------------- View: Log attempt ---------------- */
 function blankLog(eventId, keep = {}) {
-  const fid = keep.formatId && state.formatsById[keep.formatId]?.event_id === eventId ? keep.formatId : lastFormatFor(state.me.id, eventId);
+  const fid = keep.formatId && state.formatsById[keep.formatId]?.event_id === eventId && state.formatsById[keep.formatId].is_standard ? keep.formatId : defaultFormatFor(eventId);
   const f = state.formatsById[fid] || {};
   return { editingId: null, eventId, formatId: fid, date: keep.date || TODAY(), wrong: [], wrongErr: '', correct: '', total: f.item_count ?? (kindOf(eventId) === 'time' ? 52 : ''), time: '', interval: f.interval_seconds ?? '', note: '', abandoned: false, file: null, err: '' };
 }
@@ -1775,11 +1928,11 @@ function viewLog() {
       ${wrong}
       <div class="field"><label for="f-note">Note <span class="muted" style="font-weight:400">(optional)</span></label><textarea id="f-note" class="input" rows="2" placeholder="e.g. lost focus at card 30">${esc(L.note)}</textarea></div>
       <label class="check"><input id="f-abandoned" type="checkbox"${L.abandoned ? ' checked' : ''}> Didn’t finish – counts for my streak, not for scores</label>
-      <div class="field"><label for="f-proof">GAMA screenshot <span class="muted" style="font-weight:400">(optional)</span></label><input id="f-proof" type="file" accept="image/*" class="small">${L.file ? `<span class="hint">Selected: ${esc(L.file.name)}</span>` : ''}</div>
+      ${proofPicker('f-proof', L.file, 'log')}
       <div id="log-err" class="err" role="alert">${esc(L.err)}</div>
       <div class="grid2" style="padding-bottom:8px">
         ${editing
-          ? `<button type="button" class="btn danger" data-act="delete-attempt" data-id="${esc(L.editingId)}">Delete</button><button type="button" class="btn primary" data-act="save-log">Save changes</button>`
+          ? `<a class="btn" href="#/attempt/${esc(L.editingId)}">Cancel</a><button type="button" class="btn primary" data-act="save-log">Save changes</button>`
           : `<button type="button" class="btn outline" data-act="save-log-another" id="btn-another">Save, log another</button><button type="button" class="btn primary" data-act="save-log" id="btn-save">Save</button>`}
       </div>
     </form></main>`;
@@ -1790,6 +1943,17 @@ function ghostBox(athleteId, formatId, excludeId, ref) {
   if ((!g7 || g7.id === excludeId) && (!g30 || g30.id === excludeId)) return '';
   const cell = (g, label) => g && g.id !== excludeId ? `<div><div class="tiny muted">${label} · ${esc(fmtShort(g.practiced_on))}</div><div class="num" style="font-size:20px">${esc(fmtResult(g))}</div></div>` : `<div><div class="tiny muted">${label}</div><div class="muted">–</div></div>`;
   return `<div class="card" style="padding:10px 14px"><div class="tiny" style="font-weight:700;margin-bottom:4px">Ghost race: ${ref ? 'results' : 'your results'} in this format</div><div class="grid2">${cell(g7, '7 days ago')}${cell(g30, '30 days ago')}</div></div>`;
+}
+/* Screenshot picker: choose a file, paste from the clipboard, or paste anywhere on the page */
+let proofPreviewUrl = null;
+function proofPicker(inputId, file, scope) {
+  if (proofPreviewUrl) { try { URL.revokeObjectURL(proofPreviewUrl); } catch (e) { /* ignore */ } proofPreviewUrl = null; }
+  if (file) { try { proofPreviewUrl = URL.createObjectURL(file); } catch (e) { proofPreviewUrl = null; } }
+  return `<div class="field"><span class="label">GAMA screenshot <span class="muted" style="font-weight:400">(optional)</span></span>
+    ${file ? `<div class="proof-preview">${proofPreviewUrl ? `<img src="${proofPreviewUrl}" alt="Screenshot to attach">` : ''}<div class="grow small">${esc(file.name || 'Pasted screenshot')}</div><button type="button" class="btn sm" data-act="proof-clear" data-scope="${scope}">Remove</button></div>` : ''}
+    <div class="proof-actions"><button type="button" class="btn sm" data-act="proof-paste" data-scope="${scope}">Paste screenshot</button>
+      <label class="btn sm" for="${inputId}">Choose file</label><input id="${inputId}" type="file" accept="image/*" class="sr" data-scope="${scope}"></div>
+    <textarea class="input paste-target" rows="1" data-scope="${scope}" aria-label="Paste a screenshot here" placeholder="…or tap and hold here, then Paste (Ctrl+V on a computer)"></textarea></div>`;
 }
 /* Count events that still ask for time used (the team removed it from the others) */
 const TIME_USED_EVENTS = ['long_number', 'long_card'];
@@ -1946,12 +2110,12 @@ function viewProgress() {
   if (!P.calMonth) P.calMonth = today.slice(0, 7);
   const ath = state.profilesById[P.athleteId]; const mine = attemptsOf(ath.id);
   const used = state.events.filter((e) => mine.some((a) => a.event_id === e.id)).map((e) => e.id);
-  const evList = used.length ? used : state.events.map((e) => e.id);
+  const evList = state.events.map((e) => e.id);
   if (!P.eventId || !evList.includes(P.eventId)) P.eventId = recentEventIds(ath.id).find((id) => evList.includes(id));
   const ev = state.eventsById[P.eventId];
   const fc = {}; for (const a of mine) if (a.event_id === P.eventId) fc[a.format_id] = (fc[a.format_id] || 0) + 1;
-  const fIds = Object.keys(fc).sort((a, b) => fc[b] - fc[a]);
-  if (!P.formatId || !fIds.includes(P.formatId)) P.formatId = fIds[0] || null;
+  const fIds = formatsFor(P.eventId).map((f) => f.id);   // same format list as Log
+  if (!P.formatId || !fIds.includes(P.formatId)) { const top = fIds.slice().sort((a, b) => (fc[b] || 0) - (fc[a] || 0))[0]; P.formatId = top && fc[top] ? top : defaultFormatFor(P.eventId); }
   const start = addDays(today, -(P.range - 1));
   const inFormat = mine.filter((a) => a.format_id === P.formatId);
   const inR = inFormat.filter((a) => inRange(a.practiced_on, [start, today]));
@@ -1976,13 +2140,15 @@ function viewProgress() {
   return `<main class="shell">
     <header class="topbar" style="flex-direction:column;align-items:stretch;gap:10px;padding-bottom:0">
       <div class="row-between" style="align-items:center"><h1>${self ? 'My progress' : esc(nameOf(ath.id))}</h1><div style="width:150px">${athSel}</div></div>
-      <div class="tabs" role="group" aria-label="Event">${evList.map((id) => `<button type="button" data-act="prog-event" data-id="${id}" aria-pressed="${id === P.eventId}">${esc(state.eventsById[id].name)}</button>`).join('')}</div>
+      ${self ? '<a class="btn sm" href="#/recap" style="align-self:flex-start">Monthly recap</a>' : ''}
+
     </header>
     ${!used.length ? `<div class="section"><div class="empty">${self ? 'No attempts yet. <a href="#/log">Log your first one</a>.' : 'No attempts yet.'}</div></div>` : `
     <div class="section grid2" style="align-items:end">
-      <div class="field"><label for="prog-format">Format</label><select id="prog-format" class="input">${fIds.map((id) => opt(id, `${fmtName(id)} (${fc[id]})`, id === P.formatId)).join('')}</select></div>
-      <div class="seg" role="group" aria-label="Date range">${[[30, '30 days'], [90, '90 days'], [365, 'Year']].map(([n, l]) => `<button type="button" data-act="prog-range" data-n="${n}" aria-pressed="${P.range === n}">${l}</button>`).join('')}</div>
+      <div class="field"><label for="prog-event-select">Discipline</label><select id="prog-event-select" class="input">${evList.map((id) => opt(id, state.eventsById[id].name, id === P.eventId)).join('')}</select></div>
+      <div class="field"><label for="prog-format">Format</label><select id="prog-format" class="input">${fIds.map((id) => opt(id, `${fmtName(id)} (${fc[id] || 0})`, id === P.formatId)).join('')}</select></div>
     </div>
+    <div class="section" style="padding-top:10px"><div class="seg" role="group" aria-label="Date range">${[[30, '30 days'], [90, '90 days'], [365, 'Year']].map(([n, l]) => `<button type="button" data-act="prog-range" data-n="${n}" aria-pressed="${P.range === n}">${l}</button>`).join('')}</div></div>
     <div class="section grid3">
       <div class="stat"><div class="num" style="color:var(--red)">${pbA ? esc(fmtMetricValue(ev.id, metric(pbA))) : '–'}</div><div class="tiny muted">${pbA ? 'PB · ' + esc(fmtShort(pbA.practiced_on)) : 'No PB yet'}</div></div>
       <div class="stat"><div class="num">${inR.length}</div><div class="tiny muted">attempts</div></div>
@@ -1990,9 +2156,11 @@ function viewProgress() {
     </div>
     <section class="section"><div class="card" style="padding:12px">${chartSVG({ list: inR, eventId: ev.id, start, end: today, pb: pbA ? metric(pbA) : null, target })}</div></section>`}
     <section class="section stack" style="gap:8px">
-      <div class="row-between" style="align-items:center"><h2>Training days</h2>
-        <div style="display:flex;align-items:center;gap:4px"><button type="button" class="btn sm" data-act="cal-prev" aria-label="Previous month">‹</button><span class="small" style="min-width:76px;text-align:center">${MONTHS[+P.calMonth.slice(5, 7) - 1]} ${P.calMonth.slice(0, 4)}</span><button type="button" class="btn sm" data-act="cal-next" aria-label="Next month"${P.calMonth >= today.slice(0, 7) ? ' disabled' : ''}>›</button></div></div>
-      ${calendarHTML(ath.id, P.calMonth)}
+      <button type="button" class="collapse-head" data-act="cal-toggle" aria-expanded="${!!P.calOpen}" aria-controls="cal-body">
+        <span style="font-weight:700;font-size:17px">Training days</span><span class="tiny muted">${P.calOpen ? 'Hide' : 'Show calendar'} <span aria-hidden="true">${P.calOpen ? '▴' : '▾'}</span></span></button>
+      ${P.calOpen ? `<div id="cal-body" class="stack" style="gap:8px">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:4px"><button type="button" class="btn sm" data-act="cal-prev" aria-label="Previous month">‹</button><span class="small" style="min-width:76px;text-align:center">${MONTHS[+P.calMonth.slice(5, 7) - 1]} ${P.calMonth.slice(0, 4)}</span><button type="button" class="btn sm" data-act="cal-next" aria-label="Next month"${P.calMonth >= today.slice(0, 7) ? ' disabled' : ''}>›</button></div>
+        ${calendarHTML(ath.id, P.calMonth)}</div>` : ''}
     </section>
     ${used.length ? `<section class="section"><h2 style="margin-bottom:4px">Attempts · ${esc(fmtName(P.formatId))}</h2>${rows || '<div class="empty">No attempts.</div>'}
       ${listAll.length > list.length ? `<div style="padding-top:12px"><button type="button" class="btn" style="width:100%" data-act="prog-more">Show more</button></div>` : ''}</section>` : ''}
@@ -2001,10 +2169,11 @@ function viewProgress() {
 
 /* ---------------- View: Leaderboards ---------------- */
 function viewBoards() {
-  const B = ui.boards; const se = currentSeason();
-  if (B.period === 'season' && !se) B.period = 'month';
+  const B = ui.boards;
+  if (B.period !== 'today' && B.period !== 'month') B.period = 'month';
+  if (B.mode !== 'raw' && B.mode !== 'imp') B.mode = 'raw';
   const range = periodRange(B.period);
-  const periods = [['today', 'Today'], ['week', 'This week'], ['month', 'This month']].concat(se ? [['season', 'Season']] : []);
+  const periods = [['today', 'Today'], ['month', 'This month']];
   const stdFormats = (eid) => state.formats.filter((f) => f.event_id === eid && f.is_standard);
   let controls = '', rows = [], foot = '';
   if (B.mode === 'raw') {
@@ -2019,14 +2188,11 @@ function viewBoards() {
       <div class="field"><label for="board-format">Standard format</label><select id="board-format" class="input">${fl.map((f) => opt(f.id, f.name, f.id === B.formatId)).join('')}</select></div></div>`;
     rows = B.formatId ? boardRaw(B.period, B.eventId, B.formatId) : [];
     foot = kindOf(B.eventId) === 'time' ? 'Only fully correct attempts in a standard format count. Faster ranks higher.' : 'Best attempt in this standard format during the period.';
-  } else if (B.mode === 'pct' || B.mode === 'imp') {
-    const key = B.mode === 'pct' ? 'pctEvent' : 'impEvent';
-    controls = `<div class="field"><label for="board-event2">Event</label><select id="board-event2" class="input" data-key="${key}">${opt('overall', 'Overall (average of events)', B[key] === 'overall')}${state.events.map((e) => opt(e.id, e.name, e.id === B[key])).join('')}</select></div>`;
-    rows = B.mode === 'pct' ? boardPct(B.period, B[key]) : boardImprovement(B.period, B[key]);
-    foot = B.mode === 'pct' ? 'Best result this period against each athlete’s own target, in the target’s format.' : 'Best this period against the athlete’s median daily best over the 28 days before it. Needs 3 baseline attempts; capped at +50%.';
   } else {
-    rows = boardEffort(B.period);
-    foot = 'Days with at least one attempt in any event. Attempts count up to 5 per event per day.';
+    const key = 'impEvent';
+    controls = `<div class="field"><label for="board-event2">Event</label><select id="board-event2" class="input" data-key="${key}">${opt('overall', 'Overall (average of events)', B[key] === 'overall')}${state.events.map((e) => opt(e.id, e.name, e.id === B[key])).join('')}</select></div>`;
+    rows = boardImprovement(B.period, B[key]);
+    foot = 'Best this period against the athlete’s median daily best over the 28 days before it. Needs 3 baseline attempts; capped at +50%.';
   }
   const me = state.me.id;
   const podium = rows.length >= 3 ? `<div class="podium" aria-hidden="true">${[1, 0, 2].map((i) => {
@@ -2037,16 +2203,16 @@ function viewBoards() {
       <div class="rank">${i + 1}</div><div class="avatar sm" aria-hidden="true">${esc(r.p.initials)}</div>
       <div class="grow"><a href="#/profile/${esc(r.p.id)}" style="font-weight:600;text-decoration:none">${esc(r.p.display_name || r.p.initials)}${r.p.id === me ? ' (you)' : ''}</a><div class="tiny muted">${r.attempt ? `<a href="#/attempt/${esc(r.attempt.id)}" class="muted">${esc(r.sub)}</a>` : esc(r.sub)}</div>
         ${r.attempt && (r.attempt.status === 'pending_review' || r.attempt.status === 'verified') ? `<div class="tiny" style="margin-top:2px">${r.attempt.status === 'verified' ? '<span class="tag target">Verified</span>' : '<span class="tag gold">Unverified</span>'}</div>` : ''}</div>
-      ${r.attempt && r.attempt.proof_path ? `<span title="Screenshot attached" style="color:var(--green)">${ICONS.photo}<span class="sr">Screenshot attached</span></span>` : ''}
+      ${r.attempt && r.attempt.proof_path ? `<button type="button" class="kudos" data-act="view-proof" data-id="${esc(r.attempt.id)}" aria-label="View ${esc(r.p.initials)}’s GAMA screenshot" style="color:var(--green)">${ICONS.photo}</button>` : ''}
       <div class="big-val">${esc(r.display)}</div></div>`).join('')
     : `<div class="empty">No results for this period yet. <a href="#/log">Log an attempt</a> to get on the board.</div>`;
   return `<main class="shell">
     <header class="hero" style="padding-bottom:0;gap:10px"><h1>Leaderboards</h1>
       <div class="tabs" role="group" aria-label="Period" style="display:grid;grid-template-columns:repeat(${periods.length},1fr)">${periods.map(([p, l]) => `<button type="button" data-act="board-period" data-p="${p}" aria-pressed="${B.period === p}">${l}</button>`).join('')}</div></header>
     <div class="section stack">
-      <div class="chips" role="group" aria-label="Ranking">${[['raw', 'Raw best'], ['pct', '% of target'], ['imp', 'Improvement'], ['effort', 'Effort']].map(([m, l]) => `<button type="button" class="chip" data-act="board-mode" data-m="${m}" aria-pressed="${B.mode === m}">${l}</button>`).join('')}</div>
+      <div class="chips" role="group" aria-label="Ranking">${[['raw', 'Raw best'], ['imp', 'Improvement']].map(([m, l]) => `<button type="button" class="chip" data-act="board-mode" data-m="${m}" aria-pressed="${B.mode === m}">${l}</button>`).join('')}</div>
       ${controls}
-      <div class="tiny muted">${B.period === 'season' ? esc(se.name) + ' · ' : ''}${esc(fmtShort(range[0]))}${range[0] !== range[1] ? ' – ' + esc(fmtShort(range[1])) : ''}${B.period === 'season' ? ` · competition ${esc(fmtShort(se.competition_on))}` : ''}</div>
+      <div class="tiny muted">${esc(fmtShort(range[0]))}${range[0] !== range[1] ? ' – ' + esc(fmtShort(range[1])) : ''}</div>
     </div>
     <section class="section" aria-label="Rankings" style="padding-top:0">${podium}<div style="padding-top:8px">${list}</div>
       <p class="tiny muted" style="margin:14px 0 0">${esc(foot)}</p></section>
@@ -2266,6 +2432,7 @@ document.addEventListener('click', (e) => {
     case 'prog-event': ui.progress.eventId = id; ui.progress.formatId = null; ui.progress.limit = 20; render(); break;
     case 'prog-range': ui.progress.range = +el.dataset.n; render(); break;
     case 'prog-more': ui.progress.limit += 20; render(); break;
+    case 'cal-toggle': ui.progress.calOpen = !ui.progress.calOpen; render(); break;
     case 'cal-prev': case 'cal-next': {
       const m = ui.progress.calMonth; const d = new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7) - 1 + (a === 'cal-next' ? 1 : -1), 1));
       ui.progress.calMonth = d.toISOString().slice(0, 7); render(); break;
@@ -2295,9 +2462,11 @@ document.addEventListener('change', (e) => {
     if (kindOf(L.eventId) === 'count_at_interval' && f.interval_seconds != null) L.interval = f.interval_seconds;
     render(); return;
   }
-  if (t.id === 'f-proof' && ui.log) { ui.log.file = t.files && t.files[0] ? t.files[0] : null; return; }
+  if (t.id === 'f-proof' && ui.log) { syncLog(); ui.log.file = t.files && t.files[0] ? t.files[0] : null; render(); return; }
+  if (t.id === 'proof-file') { ui.attemptProof = t.files && t.files[0] ? t.files[0] : null; render(); return; }
   if (t.id === 'prog-athlete') { ui.progress.athleteId = t.value; ui.progress.eventId = null; ui.progress.formatId = null; render(); return; }
   if (t.id === 'prog-format') { ui.progress.formatId = t.value; render(); return; }
+  if (t.id === 'prog-event-select') { ui.progress.eventId = t.value; ui.progress.formatId = null; ui.progress.limit = 20; render(); return; }
   if (t.id === 'board-event') { ui.boards.eventId = t.value; ui.boards.formatId = null; render(); return; }
   if (t.id === 'board-format') { ui.boards.formatId = t.value; render(); return; }
   if (t.id === 'board-event2') { ui.boards[t.dataset.key] = t.value; render(); return; }
@@ -2362,7 +2531,11 @@ document.addEventListener('submit', (e) => {
 'use strict';
 /* ================= v2 views: Trouble items, Drill, Profile, Attempt detail, Admin review ================= */
 ui.trouble = { family: null, range: 30, sel: null, block: '0', pair: 'SS' };
+ui.attemptProof = null;
 ui.drill = null;
+const BADGE_EMOJI = { first_deck: '🃏', perfect_ten: '🎯', fast_ears: '👂', streak_7: '🔥', streak_30: '📆', streak_100: '💯', decathlete: '🏅', bug_hunter: '🐞', fixed_it: '🔧' };
+const DISCIPLINE_EMOJI = { names_faces: '👤', binary: '💻', images: '🖼️', speed_number: '🔢', long_card: '♠️', dates: '📅', long_number: '🧮', words: '📝', spoken: '🎧', speed_card: '⚡' };
+const badgeEmoji = (b) => BADGE_EMOJI[b.id] || DISCIPLINE_EMOJI[b.event_id] || '🏅';
 const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K'];
 const SUITS = ['S', 'H', 'D', 'C'];
 const SUIT_SYM = { S: '♠', H: '♥', D: '♦', C: '♣' };
@@ -2386,6 +2559,7 @@ function viewTrouble() {
   if (!T.family || !fams.includes(T.family)) {
     T.family = fams.slice().sort((a, b) => troubleData(myEms(b), 0).items.length - troubleData(myEms(a), 0).items.length)[0];
   }
+  if (!T.range) T.range = 30;
   const sys = myEms(T.family); const data = troubleData(sys, T.range);
   let grid = '', sub = '';
   if (sys.kind === 'digits_2') grid = heatGrid(Array.from({ length: 100 }, (_, i) => String(i).padStart(2, '0')), 10, data);
@@ -2428,7 +2602,7 @@ function viewTrouble() {
       <h1>Trouble items</h1>
       ${fams.length > 1 ? `<div class="seg" role="group" aria-label="Memory system">${fams.map((f) => `<button type="button" data-act="trouble-fam" data-f="${f}" aria-pressed="${T.family === f}">${EMS_FAMILIES[f].label}</button>`).join('')}</div>` : ''}
       <div class="row-between" style="align-items:center"><span class="tiny muted">${esc(systemLabel(sys))} · ${data.attempts} attempts</span>
-        <div class="seg" role="group" aria-label="Date range" style="width:190px">${[[30, '30 d'], [90, '90 d'], [0, 'All']].map(([n, l]) => `<button type="button" data-act="trouble-range" data-n="${n}" aria-pressed="${T.range === n}">${l}</button>`).join('')}</div></div>
+        <div class="seg" role="group" aria-label="Date range" style="width:140px">${[[30, '30 d'], [90, '90 d']].map(([n, l]) => `<button type="button" data-act="trouble-range" data-n="${n}" aria-pressed="${T.range === n}">${l}</button>`).join('')}</div></div>
     </header>
     <section class="section stack" style="gap:10px" aria-label="Error heatmap">
       ${sub}${grid}
@@ -2468,42 +2642,65 @@ function viewProfile() {
   const p = state.profilesById[id]; const self = id === state.me.id;
   const lv = xpOf(id); const st = streakInfo(id);
   const earned = Object.fromEntries(state.athleteBadges.filter((b) => b.athlete_id === id).map((b) => [b.badge_id, b]));
-  const badgeCards = state.badges.slice().sort((a, b) => (!!earned[b.id] - !!earned[a.id]) || a.sort_order - b.sort_order).map((b) => {
+  const general = state.badges.filter((b) => !b.kind || b.kind === 'special');
+  const badgeCards = general.slice().sort((a, b) => (!!earned[b.id] - !!earned[a.id]) || a.sort_order - b.sort_order).map((b) => {
     const e = earned[b.id];
-    return `<div class="badge${e ? '' : ' locked'}"><div class="medal">${ICONS.badge}</div><div class="bname">${esc(b.name)}</div><div class="tiny muted">${esc(badgeDesc(b))}</div>${e ? `<div class="tiny" style="font-weight:600">${esc(fmtShort(e.earned_on))}</div>` : ''}</div>`;
+    return `<div class="badge${e ? '' : ' locked'}"><div class="medal" aria-hidden="true">${badgeEmoji(b)}</div><div class="bname">${esc(b.name)}</div><div class="tiny muted">${esc(badgeDesc(b))}</div>${e ? `<div class="tiny" style="font-weight:600">${esc(fmtShort(e.earned_on))}</div>` : ''}</div>`;
   }).join('');
-  const pbRows = [];
-  for (const ev of state.events) {
-    const fs = state.formats.filter((f) => f.event_id === ev.id && f.is_standard);
-    for (const f of fs) {
-      const b = bestAttempt(attemptsOf(id).filter((a) => a.format_id === f.id && perf(a)));
-      if (b) pbRows.push(`<div class="list-row"><div class="grow"><div style="font-weight:600">${esc(ev.name)}</div><div class="tiny muted">${esc(f.name)} · ${esc(fmtShort(b.practiced_on))}</div></div><a class="big-val" href="#/attempt/${esc(b.id)}" style="text-decoration:none">${esc(fmtMetricValue(ev.id, metric(b)))}</a></div>`);
-    }
-  }
-  const drillFormats = new Set(attemptsOf(id).filter((a) => !state.formatsById[a.format_id]?.is_standard).map((a) => a.format_id)).size;
-  const recent = attemptsOf(id).slice().sort((a, b) => (b.logged_at || '').localeCompare(a.logged_at || '')).slice(0, 5);
+  const chipLabel = (b) => {
+    if (b.kind === 'attempt_count') return `${trimNum(b.threshold)}×`;
+    if (b.rule === 'cards_correct') return `${trimNum(b.threshold)}c`;
+    if (b.rule === 'time_at_most' || kindOf(b.event_id) === 'time') return b.threshold >= 60 ? fmtTime(b.threshold) : `${trimNum(b.threshold, 2)}s`;
+    return trimNum(b.threshold);
+  };
+  const chip = (b) => { const e = earned[b.id]; const lvl = (b.id.match(/^level_.+_(\d+)$/) || [])[1];
+    return `<span class="lchip ${e ? 'tier-' + esc(b.tier || 'gold') : 'locked'}" title="${lvl ? 'Level ' + lvl + ': ' : ''}${esc(badgeDesc(b))}${e ? ' · earned ' + esc(fmtShort(e.earned_on)) : ''}">${esc(chipLabel(b))}<span class="sr">${lvl ? 'Level ' + lvl + ', ' : ''}${esc(badgeDesc(b))}, ${e ? 'earned ' + esc(fmtShort(e.earned_on)) : 'not earned yet'}</span></span>`; };
+  // Order chosen by the team for the Discipline levels section
+  const DISCIPLINE_ORDER = ['names_faces', 'binary', 'images', 'speed_number', 'long_card', 'dates', 'long_number', 'words', 'spoken', 'speed_card'];
+  const ladderEvents = DISCIPLINE_ORDER.map((id) => state.eventsById[id]).filter(Boolean).concat(state.events.filter((e) => !DISCIPLINE_ORDER.includes(e.id)));
+  const ladders = ladderEvents.map((ev) => {
+    const levels = state.badges.filter((b) => b.event_id === ev.id && b.kind === 'score').sort((a, b) => a.sort_order - b.sort_order);
+    const counts = state.badges.filter((b) => b.event_id === ev.id && b.kind === 'attempt_count').sort((a, b) => a.sort_order - b.sort_order);
+    if (!levels.length && !counts.length) return '';
+    const reached = levels.filter((b) => earned[b.id]).length;
+    const next = levels.find((b) => !earned[b.id]);
+    return `<div class="ladder"><div class="row-between"><span style="font-weight:700"><span aria-hidden="true">${DISCIPLINE_EMOJI[ev.id] || ''}</span> ${esc(ev.name)}</span><span class="tiny muted">${reached ? 'Level ' + reached : 'Not started'}${next ? ' · next: ' + esc(badgeDesc(next)) : ' · all levels done'}</span></div>
+      <div class="ladder-grid">${levels.map(chip).join('')}</div>
+      ${counts.length ? `<div class="ladder-counts"><span class="tiny muted">Attempts</span>${counts.map(chip).join('')}</div>` : ''}</div>`;
+  }).join('');
   const P = lv.parts;
   return `<main class="shell">
     <header class="hero">
       <div class="row-between" style="align-items:center"><button type="button" class="btn link" data-act="back" style="color:var(--hero-ink)">Back</button>${self ? '<a href="#/me" style="color:var(--hero-ink)">Settings</a>' : ''}</div>
       <div style="display:flex;align-items:center;gap:14px"><div class="avatar" style="width:64px;height:64px;border-radius:32px;font-size:26px">${esc(p.initials)}</div>
-        <div><h1>${esc(p.display_name || p.initials)}${self ? ' (you)' : ''}</h1><div class="meta">Level ${lv.level} · ${st.streak}-day streak · joined ${esc(fmtShort(p.joined_on))}</div></div></div>
-      <div class="stack" style="gap:6px"><div class="row-between small"><span>${lv.xp} XP</span><span style="color:var(--hero-muted)">${lv.next - lv.xp} XP to level ${lv.level + 1}</span></div>
+        <div><h1>${esc(p.display_name || p.initials)}${self ? ' (you)' : ''}</h1><div class="meta">Rank ${lv.level} · ${st.streak}-day streak · joined ${esc(fmtShort(p.joined_on))}</div></div></div>
+      <div class="stack" style="gap:6px"><div class="row-between small"><span>${lv.xp} XP</span><span style="color:var(--hero-muted)">${lv.next - lv.xp} XP to rank ${lv.level + 1}</span></div>
         <div class="bar" role="img" aria-label="${lv.xp} of ${lv.next} XP"><span style="width:${Math.min(100, lv.pct).toFixed(1)}%"></span></div></div>
     </header>
     <section class="section"><div class="grid3">
-      <div class="stat"><div class="num">${P.attempts}</div><div class="tiny muted">XP from attempts</div></div>
-      <div class="stat"><div class="num">${P.pb + P.target}</div><div class="tiny muted">from PBs and targets</div></div>
-      <div class="stat"><div class="num">${P.errors + P.quests}</div><div class="tiny muted">from wrong items and quests</div></div></div></section>
+      <div class="stat"><div class="num">${P.standard + P.oneMin}</div><div class="tiny muted">XP from attempts</div></div>
+      <div class="stat"><div class="num">${P.eotw + (P.pool || 0)}</div><div class="tiny muted">from event of the week and team pool</div></div>
+      <div class="stat"><div class="num">${P.errors + P.quests}</div><div class="tiny muted">from wrong items and quests</div></div></div>
+      <div class="row-between" style="margin-top:8px;align-items:center"><span class="tiny muted">How XP works</span>${infoBtn('xp')}</div>
+      <div id="info-xp" class="info-panel" hidden><ul>
+        <li>10 XP per attempt in the standard format: 5 min, Long Cards 10 min, Long Numbers 15 min, Speed Card 52 cards, Spoken at 1 s per digit or faster. Up to 5 per discipline a day.</li>
+        <li>20 XP per standard attempt in the event of the week.</li>
+        <li>5 XP per 1 min Binary, Speed Number, Words or Images attempt. Up to 2 per discipline a day.</li>
+        <li>+5 when you log wrong items on an attempt that earned XP.</li>
+        <li>+10 for the daily quest.</li>
+        <li>A share of the team pool when the team reaches the event-of-the-week target, in proportion to your contribution.</li>
+        <li>Other formats, rejected attempts and “didn’t finish” earn no XP.</li></ul></div></section>
     <section class="section"><div class="row-between" style="margin-bottom:10px"><h2>Badges</h2><span class="tiny muted">${Object.keys(earned).length} of ${state.badges.length}</span></div><div class="badges">${badgeCards}</div></section>
-    <section class="section"><h2 style="margin-bottom:4px">Personal bests · standard formats</h2>${pbRows.join('') || '<div class="empty">No standard-format results yet.</div>'}
-      ${drillFormats ? `<p class="tiny muted" style="margin:8px 0 0">Plus results in ${drillFormats} drill format${drillFormats > 1 ? 's' : ''}, shown in Progress.</p>` : ''}</section>
-    <section class="section"><h2 style="margin-bottom:4px">Recent attempts</h2>${recent.map((a) => `<a class="list-row" href="#/attempt/${esc(a.id)}" style="text-decoration:none"><span class="tiny muted" style="width:52px">${esc(fmtShort(a.practiced_on))}</span><span class="grow">${esc(state.eventsById[a.event_id]?.name || '')}</span><span class="num" style="font-size:18px">${esc(fmtResult(a))}</span></a>`).join('') || '<div class="empty">No attempts yet.</div>'}</section>
+    <section class="section"><div class="row-between" style="align-items:center"><h2>Discipline levels</h2>${infoBtn('levels')}</div>
+      <div id="info-levels" class="info-panel" hidden><ul>
+        <li>Levels 1–20 in each discipline. Each chip shows the score or time needed.</li>
+        <li>Bronze 1–5, silver 6–10, gold 11–15, platinum 16–20.</li>
+        <li>Counts in the standard format only: 5 min, Long Numbers 15 min, Long Cards 10 min, Spoken at 1 s per digit or faster.</li>
+        <li>Speed Card: “c” is cards correct (Levels 1–4); Level 5 is 52/52 within 5:00; after that, 52/52 at or under the time.</li>
+        <li>A result flagged for review earns its levels once an admin verifies it.</li></ul></div>
+      ${ladders}</section>
     ${self || isAdmin() ? notesSection(id, null) : ''}
-    <div class="section stack">
-      <button type="button" class="btn big" data-act="profile-progress" data-id="${esc(id)}">See progress charts</button>
-      ${self ? `<a class="btn big" href="#/recap">Monthly recap</a>` : state.me.rival_id === id ? `<a class="btn big" href="#/rival">Head-to-head this month</a>` : `<button type="button" class="btn big" data-act="set-rival" data-id="${esc(id)}">Make ${esc(p.initials)} my rival</button>`}
-    </div>
+    ${self ? '' : `<div class="section">${state.me.rival_id === id ? `<a class="btn big" href="#/rival">Head-to-head this month</a>` : `<button type="button" class="btn big" data-act="set-rival" data-id="${esc(id)}">Make ${esc(p.initials)} my rival</button>`}</div>`}
   </main>`;
 }
 
@@ -2530,7 +2727,7 @@ function viewAttempt() {
     <section class="section stack" style="gap:10px">
       ${a.proof_path ? `<button type="button" class="btn" data-act="view-proof" data-id="${esc(a.id)}">${ICONS.photo}View GAMA screenshot</button>` : ''}
       ${!a.proof_path && canAddProof(a) ? `<div class="card stack" style="gap:8px">${proofRequested(a) ? '<div class="small"><b>New personal best in a standard format.</b> Add your GAMA screenshot to confirm it.</div>' : '<div class="small">Add your GAMA screenshot (optional).</div>'}
-        <label class="sr" for="proof-file">Screenshot</label><input id="proof-file" type="file" accept="image/*" class="small"><button type="button" class="btn primary" data-act="proof-upload" data-id="${esc(a.id)}">Upload screenshot</button></div>` : ''}
+        ${proofPicker('proof-file', ui.attemptProof, 'attempt')}<button type="button" class="btn primary" data-act="proof-upload" data-id="${esc(a.id)}"${ui.attemptProof ? '' : ' disabled'}>Upload screenshot</button></div>` : ''}
       ${isAdmin() ? `<div class="grid3">${a.status !== 'verified' ? `<button type="button" class="btn primary" data-act="attempt-status" data-s="verified" data-id="${esc(a.id)}">Verify</button>` : '<span></span>'}${a.status !== 'rejected' ? `<button type="button" class="btn danger" data-act="attempt-status" data-s="rejected" data-id="${esc(a.id)}">Reject</button>` : `<button type="button" class="btn" data-act="attempt-status" data-s="self_reported" data-id="${esc(a.id)}">Restore</button>`}</div>` : ''}
       ${ghostBox(a.athlete_id, a.format_id, a.id, a.practiced_on)}
     </section>
@@ -2544,6 +2741,7 @@ function viewAttempt() {
   </main>`;
 }
 
+const infoBtn = (k) => `<button type="button" class="info-btn" data-act="toggle-info" data-k="${k}" aria-expanded="false" aria-controls="info-${k}" aria-label="How this works">i</button>`;
 /* Admin: review queue, badge thresholds, verification settings */
 function adminReview(pending) {
   if (!pending.length) return '<div class="empty">Nothing waiting for review. Results that beat the team best, jump sharply, arrive in bursts, are backdated or are edited after logging appear here.</div>';
@@ -2556,11 +2754,14 @@ function adminReview(pending) {
       <button type="button" class="btn sm danger" data-act="attempt-status" data-s="rejected" data-id="${esc(a.id)}">Reject</button></div></div>`).join('');
 }
 function adminBadges() {
-  return `<p class="small muted" style="margin:0 0 12px">Changing a threshold doesn’t take away badges already earned.</p><div class="table-wrap"><table><thead><tr><th>Badge</th><th>Rule</th><th>Threshold</th><th>Second threshold</th><th><span class="sr">Save</span></th></tr></thead><tbody>
-    ${state.badges.map((b) => `<tr><td><label class="sr" for="bn-${b.id}">Name</label><input id="bn-${b.id}" class="input" style="min-height:40px;min-width:140px" value="${esc(b.name)}" maxlength="40"></td><td style="white-space:normal;min-width:200px">${esc(badgeDesc(b))}</td>
-      <td>${b.threshold != null ? `<label class="sr" for="bt-${b.id}">Threshold</label><input id="bt-${b.id}" class="input" style="min-height:40px;width:90px" inputmode="decimal" value="${esc(trimNum(b.threshold, 2))}">` : '–'}</td>
-      <td>${b.threshold2 != null ? `<label class="sr" for="bt2-${b.id}">Second threshold</label><input id="bt2-${b.id}" class="input" style="min-height:40px;width:90px" inputmode="decimal" value="${esc(trimNum(b.threshold2, 2))}">` : '–'}</td>
-      <td><button type="button" class="btn sm" data-act="badge-save" data-id="${b.id}">Save</button></td></tr>`).join('')}</tbody></table></div>`;
+  const row = (b) => `<tr><td><label class="sr" for="bn-${b.id}">Name</label><input id="bn-${b.id}" class="input" style="min-height:40px;min-width:160px" value="${esc(b.name)}" maxlength="40"></td><td style="white-space:normal;min-width:190px">${esc(badgeDesc(b))}${b.tier ? ` <span class="tag tier-${esc(b.tier)}">${esc(b.tier)}</span>` : ''}</td>
+      <td>${b.threshold != null ? `<label class="sr" for="bt-${b.id}">Threshold</label><input id="bt-${b.id}" class="input" style="min-height:40px;width:90px" inputmode="decimal" value="${esc(trimNum(b.threshold, 2))}">${b.rule === 'time_at_most' ? '<div class="tiny muted">seconds</div>' : b.rule === 'cards_correct' ? '<div class="tiny muted">cards</div>' : ''}` : '–'}</td>
+      <td>${b.threshold2 != null ? `<label class="sr" for="bt2-${b.id}">Second threshold</label><input id="bt2-${b.id}" class="input" style="min-height:40px;width:90px" inputmode="decimal" value="${esc(trimNum(b.threshold2, 2))}"><div class="tiny muted">s per digit</div>` : '–'}</td>
+      <td><button type="button" class="btn sm" data-act="badge-save" data-id="${b.id}">Save</button></td></tr>`;
+  const table = (list) => `<div class="table-wrap"><table><thead><tr><th>Badge</th><th>Rule</th><th>Threshold</th><th>Second</th><th><span class="sr">Save</span></th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></div>`;
+  const groups = [['General', state.badges.filter((b) => !b.kind || b.kind === 'special')]].concat(state.events.map((e) => [e.name, state.badges.filter((b) => b.event_id === e.id && b.kind && b.kind !== 'special')]));
+  return `<p class="small muted" style="margin:0 0 12px">Levels follow the team’s benchmark table. Changing a threshold doesn’t take away badges already earned. Speed Card Levels 1–4 are cards correct; Levels 5–20 are 52/52 times in seconds.</p>
+    ${groups.filter(([, l]) => l.length).map(([name, l], i) => `<details class="card" style="margin-bottom:10px"${i === 0 ? ' open' : ''}><summary style="cursor:pointer;font-weight:700;min-height:28px">${esc(name)} <span class="tiny muted">(${l.length})</span></summary><div style="margin-top:10px">${table(l.sort((a, b) => a.sort_order - b.sort_order))}</div></details>`).join('')}`;
 }
 function adminSettings() {
   return `<form id="settings-form" class="card stack" novalidate><h2>Rules and goals</h2><p class="small muted" style="margin:0">Review thresholds are draft values from the design doc (§9). Flagged results go to the Review tab and show as unverified until you verify or reject them.</p>
@@ -2568,12 +2769,38 @@ function adminSettings() {
     <div><button class="btn primary" type="submit">Save rules</button></div></form>`;
 }
 
+function takePastedImage(file, scope) {
+  if (!file || !file.type.startsWith('image/')) { toast('That isn’t an image.'); return; }
+  if (scope === 'log' && ui.log) { syncLog(); ui.log.file = file; } else ui.attemptProof = file;
+  render(); toast('Screenshot ready to attach');
+}
+document.addEventListener('paste', (e) => {
+  const onLog = ui.route === 'log' && ui.log; const onAttempt = ui.route === 'attempt' && document.getElementById('proof-file');
+  if (!onLog && !onAttempt) return;
+  const items = [...((e.clipboardData && e.clipboardData.items) || [])];
+  const img = items.find((i) => i.kind === 'file' && i.type.startsWith('image/'));
+  if (!img) { if (e.target.classList && e.target.classList.contains('paste-target')) { e.preventDefault(); toast('Paste a screenshot image here.'); } return; }
+  e.preventDefault(); takePastedImage(img.getAsFile(), onLog ? 'log' : 'attempt');
+});
 /* ---------------- v2 events ---------------- */
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
   const id = el.dataset.id; const T = ui.trouble;
   switch (el.dataset.act) {
     case 'back': goBack(); break;
+    case 'toggle-info': { const panel = document.getElementById('info-' + el.dataset.k); if (panel) { panel.hidden = !panel.hidden; el.setAttribute('aria-expanded', String(!panel.hidden)); } break; }
+    case 'proof-clear': if (el.dataset.scope === 'log' && ui.log) { syncLog(); ui.log.file = null; } else ui.attemptProof = null; render(); break;
+    case 'proof-paste': {
+      const scope = el.dataset.scope;
+      (async () => {
+        try {
+          const items = await navigator.clipboard.read();
+          for (const it of items) { const type = it.types.find((t) => t.startsWith('image/')); if (type) { const blob = await it.getType(type); takePastedImage(new File([blob], 'pasted-screenshot.' + type.split('/')[1], { type }), scope); return; } }
+          toast('No image on the clipboard. Copy the screenshot first.');
+        } catch (e) { toast('Paste isn’t allowed here. Tap and hold the box below and choose Paste, or use Choose file.'); }
+      })();
+      break;
+    }
     case 'trouble-fam': T.family = el.dataset.f; T.sel = null; render(); break;
     case 'trouble-range': T.range = +el.dataset.n; render(); break;
     case 'trouble-sel': T.sel = el.dataset.code; render(); break;
@@ -2601,8 +2828,8 @@ document.addEventListener('click', (e) => {
     }
     case 'profile-progress': ui.progress.athleteId = id; ui.progress.eventId = null; ui.progress.formatId = null; navigate('#/progress'); break;
     case 'proof-upload': {
-      const file = $('#proof-file') && $('#proof-file').files[0]; if (!file) { toast('Choose a screenshot first.'); break; }
-      act(async () => { const path = await store.uploadProof(id, file); await store.updateAttempt(id, { proof_path: path }); await loadData(); toast('Screenshot added'); render(); });
+      const file = ui.attemptProof; if (!file) { toast('Choose or paste a screenshot first.'); break; }
+      act(async () => { const path = await store.uploadProof(id, file); await store.updateAttempt(id, { proof_path: path }); ui.attemptProof = null; await loadData(); toast('Screenshot added'); render(); });
       break;
     }
     case 'attempt-status': act(async () => { await store.setStatus(id, el.dataset.s); await loadData(); toast({ verified: 'Verified', rejected: 'Rejected', self_reported: 'Restored' }[el.dataset.s]); render(); }); break;
@@ -2737,7 +2964,7 @@ function viewRival() {
     <section class="section stack">${pick}${body}</section></main>`;
 }
 
-const rotationEvent = (ws) => { const evs = state.events; const i = Math.floor(diffDays(ROTATION_ANCHOR, ws) / 7); return evs[((i % evs.length) + evs.length) % evs.length]; };
+const rotationEvent = (ws) => { const evs = eotwPool(); const i = Math.floor(diffDays(ROTATION_ANCHOR, ws) / 7); return evs[((i % evs.length) + evs.length) % evs.length]; };
 function adminSeasons() {
   const today = TODAY(); const ws0 = weekStart(today);
   const status = (s) => (s.competition_on < today ? 'Past' : s.starts_on > today ? 'Upcoming' : 'Live');
@@ -2749,16 +2976,19 @@ function adminSeasons() {
     <div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>Season</th><th>Starts</th><th>Competition</th><th>Status</th><th><span class="sr">Actions</span></th></tr></thead><tbody>
       ${state.seasons.length ? state.seasons.map((s) => `<tr><td>${esc(s.name)}</td><td>${esc(fmtShort(s.starts_on))} ${s.starts_on.slice(0, 4)}</td><td>${esc(fmtShort(s.competition_on))} ${s.competition_on.slice(0, 4)}</td><td>${status(s)}</td><td><button type="button" class="btn sm danger" data-act="season-delete" data-id="${esc(s.id)}">Delete</button></td></tr>`).join('') : '<tr><td colspan="5" class="muted">No seasons yet.</td></tr>'}
     </tbody></table></div>
-    <div class="card stack" style="margin-top:14px"><h2>Event of the week</h2><p class="small muted" style="margin:0">Attempts in this event earn double XP for the week. Left on Auto, it rotates through the events in order.</p>
+    <div class="card stack" style="margin-top:14px"><h2>Event of the week</h2><p class="small muted" style="margin:0">Attempts in this event earn double XP for the week, and the team works toward a shared target for an XP pool. Left on Auto, the event rotates in order (never Long Cards or Long Numbers) and the target alternates between correct items and attempts in a shuffled order. Target sizes and the pool are in Settings.</p>
       ${[0, 1, 2, 3].map((k) => { const ws = addDays(ws0, k * 7); const pick = state.weeklyEvents.find((w) => w.week_start === ws);
-        return `<div class="field"><label for="eotw-${ws}">${k === 0 ? 'This week' : 'Week of ' + esc(fmtShort(ws))}</label><select id="eotw-${ws}" class="input" data-week="${ws}">${opt('', `Auto (${rotationEvent(ws).name})`, !pick)}${state.events.map((e) => opt(e.id, e.name, pick && pick.event_id === e.id)).join('')}</select></div>`; }).join('')}
+        const autoType = (() => { const idx = Math.floor(diffDays(ROTATION_ANCHOR, ws) / 7); return seededShuffle(['items', 'attempts'], 'pool|' + Math.floor(idx / 2))[((idx % 2) + 2) % 2]; })();
+        const tLabel = (t) => (t === 'items' ? 'Correct items' : 'Attempts');
+        return `<div class="grid2"><div class="field"><label for="eotw-${ws}">${k === 0 ? 'This week' : 'Week of ' + esc(fmtShort(ws))}</label><select id="eotw-${ws}" class="input" data-week="${ws}">${opt('', `Auto (${rotationEvent(ws).name})`, !pick)}${eotwPool().map((e) => opt(e.id, e.name, pick && pick.event_id === e.id)).join('')}</select></div>
+          <div class="field"><label for="eotwt-${ws}">Team target</label><select id="eotwt-${ws}" class="input" data-week-target="${ws}">${opt('', `Auto (${tLabel(autoType)})`, !(pick && pick.target_type))}${['items', 'attempts'].map((t) => opt(t, tLabel(t), pick && pick.target_type === t)).join('')}</select></div></div>`; }).join('')}
     </div>`;
 }
 function adminExport() {
   return `<div class="card stack"><h2>Export</h2><p class="small muted" style="margin:0">CSV files open in Excel, Numbers and Google Sheets. The attempts file includes wrong items, flags, status and notes.</p>
     <button type="button" class="btn" data-act="export" data-what="attempts">All attempts (${state.attempts.length})</button>
     <button type="button" class="btn" data-act="export" data-what="targets">Targets, with history (${state.targets.length})</button>
-    <button type="button" class="btn" data-act="export" data-what="athletes">Athletes, with level, XP, streak and badges (${state.profiles.length})</button></div>`;
+    <button type="button" class="btn" data-act="export" data-what="athletes">Athletes, with rank, XP, streak and badges (${state.profiles.length})</button></div>`;
 }
 
 let csvUrl = null;
@@ -2812,7 +3042,12 @@ document.addEventListener('click', (e) => {
 document.addEventListener('change', (e) => {
   const t = e.target;
   if (t.id === 'rival-select') { act(async () => { await store.updateProfile({ rival_id: t.value || null }); await loadData(); render(); }); return; }
-  if (t.dataset && t.dataset.week) { act(async () => { await store.setWeeklyEvent(t.dataset.week, t.value || null); await loadData(); toast('Event of the week saved'); render(); }); }
+  if (t.dataset && (t.dataset.week || t.dataset.weekTarget)) {
+    const ws = t.dataset.week || t.dataset.weekTarget;
+    const evSel = document.getElementById('eotw-' + ws), tSel = document.getElementById('eotwt-' + ws);
+    const eventId = evSel.value, targetType = tSel.value;
+    act(async () => { await store.setWeeklyPick(ws, eventId || targetType ? { event_id: eventId || rotationEvent(ws).id, target_type: targetType || null } : null); await loadData(); toast('Saved'); render(); });
+  }
 });
 document.addEventListener('submit', (e) => {
   const f = e.target;
