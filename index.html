@@ -268,7 +268,7 @@ const CONFIG = {
 <script>
 'use strict';
 /* ---------------- Version (same in the demo and the live build) ---------------- */
-const APP_VERSION = '2026-10-24-209be0';
+const APP_VERSION = '2026-10-24-cb8ac2';
 /* ---------------- Utilities ---------------- */
 const TZ = 'Asia/Singapore';
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -1515,6 +1515,13 @@ class DemoStore {
   }
   async adminSetActive(id, active) { const p = this.db.profiles.find((x) => x.id === id); const b = { ...p }; p.active = active; this.audit('profiles', id, 'UPDATE', b, { ...p }); this.save(); }
   async adminSetRole(id, role) { const p = this.db.profiles.find((x) => x.id === id); const b = { ...p }; p.role = role; this.audit('profiles', id, 'UPDATE', b, { ...p }); this.save(); }
+  async adminSetInitials(id, initials) {
+    const ini = String(initials || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{1,4}$/.test(ini)) throw new Error('Initials must be 1–4 letters or numbers.');
+    if (this.db.profiles.some((x) => x.id !== id && String(x.initials).toUpperCase() === ini)) throw new Error(ini + ' is already used.');
+    const p = this.db.profiles.find((x) => x.id === id); if (!p) throw new Error('User not found.');
+    const b = { ...p }; p.initials = ini; this.audit('profiles', id, 'UPDATE', b, { ...p }); this.save();
+  }
   async saveTarget(t) { const row = { id: uuid(), ...t, set_by: this.uid, created_at: new Date().toISOString() }; this.db.targets.push(row); this.audit('targets', row.id, 'INSERT', null, row); this.save(); }
   async deleteTarget(id) { const t = this.db.targets.find((x) => x.id === id); this.db.targets = this.db.targets.filter((x) => x.id !== id); this.audit('targets', id, 'DELETE', t, null); this.save(); }
   async loadAudit() { return JSON.parse(JSON.stringify(this.db.audit_log.slice(0, 100))); }
@@ -1613,6 +1620,10 @@ class SupabaseStore {
   async adminInvite(u) { return this.adminCall({ action: 'invite', ...u, redirect_to: location.origin + location.pathname }); }
   async adminSetActive(id, active) { return this.adminCall({ action: 'set_active', user_id: id, active }); }
   async adminSetRole(id, role) { return this.adminCall({ action: 'set_role', user_id: id, role }); }
+  async adminSetInitials(id, initials) {
+    try { return await this.adminCall({ action: 'set_initials', user_id: id, initials }); }
+    catch (e) { throw new Error(/unknown action/i.test(e.message) ? 'The admin function needs updating before initials can be edited. Redeploy admin-users from the latest files.' : e.message); }
+  }
   async saveTarget(t) { this.check(await this.sb.from('targets').insert({ ...t, set_by: this.uid })); }
   async deleteTarget(id) { this.check(await this.sb.from('targets').delete().eq('id', id)); }
   async loadAudit() { return this.check(await this.sb.from('audit_log').select('*').order('at', { ascending: false }).limit(100)); }
@@ -2398,7 +2409,10 @@ function summarizeAudit(e) {
   }
   if (e.table_name === 'targets') return `${initialsOf(row.athlete_id)} · ${state.eventsById[row.event_id]?.name || ''} · target ${fmtMetricValue(row.event_id, +row.target_value)}`;
   if (e.table_name === 'formats') return `${row.name || ''}`;
-  if (e.table_name === 'profiles') return `${row.initials || ''} ${row.role ? '· ' + row.role : ''} ${row.active === false ? '· inactive' : ''}`;
+  if (e.table_name === 'profiles') {
+    if (e.before && e.after && e.before.initials !== e.after.initials) return `initials ${e.before.initials} → ${e.after.initials}`;
+    return `${row.initials || ''} ${row.role ? '· ' + row.role : ''} ${row.active === false ? '· inactive' : ''}`;
+  }
   return '';
 }
 function viewAdmin() {
@@ -2422,7 +2436,7 @@ function viewAdmin() {
       <div><button class="btn primary" type="submit">${demo ? 'Add athlete' : 'Send invite'}</button></div>
       <p class="tiny muted" style="margin:0">${demo ? 'Demo mode adds the profile directly.' : 'They get an email link to set a password. Public sign-up stays off.'}</p></form>
       <div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>Initials</th><th>Name</th><th>Role</th><th>Status</th><th>Joined</th><th><span class="sr">Actions</span></th></tr></thead><tbody>
-      ${state.profiles.map((p) => `<tr><td class="num" style="font-size:17px">${esc(p.initials)}</td><td>${esc(p.display_name)}</td><td>${esc(p.role)}</td><td>${p.active ? 'Active' : '<span class="muted">Inactive</span>'}</td><td>${esc(fmtShort(p.joined_on))}</td>
+      ${state.profiles.map((p) => `<tr><td><button type="button" class="btn sm" data-act="edit-initials" data-id="${esc(p.id)}" aria-label="Edit initials for ${esc(p.display_name || p.initials)}, currently ${esc(p.initials)}" style="gap:6px"><span class="num" style="font-size:17px">${esc(p.initials)}</span><span aria-hidden="true" style="color:var(--muted)">✎</span></button></td><td>${esc(p.display_name)}</td><td>${esc(p.role)}</td><td>${p.active ? 'Active' : '<span class="muted">Inactive</span>'}</td><td>${esc(fmtShort(p.joined_on))}</td>
         <td>${p.id === me.id ? '<span class="tiny muted">You</span>' : `<div style="display:flex;gap:6px"><button type="button" class="btn sm" data-act="admin-role" data-id="${esc(p.id)}">${p.role === 'admin' ? 'Make athlete' : 'Make admin'}</button><button type="button" class="btn sm${p.active ? ' danger' : ''}" data-act="admin-active" data-id="${esc(p.id)}">${p.active ? 'Deactivate' : 'Activate'}</button></div>`}</td></tr>`).join('')}
       </tbody></table></div>`;
   } else if (A.tab === 'targets') {
@@ -2584,6 +2598,17 @@ document.addEventListener('click', (e) => {
       if (v && !(n >= 1 && n <= 12)) { toast('Enter bits per image between 1 and 12.'); break; }
       act(async () => { await store.saveEms('binary', v ? 'binary_n' : null, v ? n : null); await loadData(); toast('Saved'); render(); }); break;
     }
+    case 'edit-initials': {
+      const p = state.profilesById[id]; if (!p) break;
+      ui.admin.editId = id;
+      openModal(`<h2 id="modal-title" style="margin:0 0 6px">Edit initials</h2>
+        <p class="small muted" style="margin:0 0 12px">Shown on avatars, leaderboards and the team grid for ${esc(p.display_name || p.initials)}. Use 1–4 letters or numbers.</p>
+        <form id="initials-form" novalidate><div class="field"><label for="ini-input">Initials</label>
+          <input id="ini-input" class="input big" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" value="${esc(p.initials)}" style="text-transform:uppercase"><span class="field-err" id="ini-err" role="alert"></span></div>
+          <div class="grid2" style="margin-top:14px"><button type="button" class="btn" data-modal="cancel">Cancel</button><button type="submit" class="btn primary">Save</button></div></form>`, () => {});
+      const inp = $('#ini-input'); if (inp) { inp.focus(); inp.select(); }
+      break;
+    }
     case 'admin-tab': ui.admin.tab = el.dataset.t; if (ui.admin.tab === 'audit') ui.admin.audit = null; render(); break;
     case 'admin-role': { const p = state.profilesById[id]; const role = p.role === 'admin' ? 'athlete' : 'admin'; act(async () => { await store.adminSetRole(id, role); await loadData(); toast(`${p.initials} is now ${role === 'admin' ? 'an admin' : 'an athlete'}`); render(); }); break; }
     case 'admin-active': { const p = state.profilesById[id]; const run = () => act(async () => { await store.adminSetActive(id, !p.active); await loadData(); toast(`${p.initials} ${p.active ? 'deactivated' : 'activated'}`); render(); }); if (p.active) askConfirm(`Deactivate ${p.initials}? They won’t be able to sign in. Their history is kept.`, 'Deactivate', true).then((ok) => ok && run()); else run(); break; }
@@ -2674,6 +2699,19 @@ document.addEventListener('submit', (e) => {
         msg.textContent = err.message; inp.setAttribute('aria-invalid', 'true'); inp.classList.add('invalid'); inp.focus();
       }
     });
+  } else if (f.id === 'initials-form') {
+    const id = ui.admin.editId; const p = state.profilesById[id]; if (!p) { closeModal(); return; }
+    const ini = $('#ini-input').value.trim().toUpperCase(); const msg = $('#ini-err');
+    const fail = (t) => { msg.textContent = t; $('#ini-input').setAttribute('aria-invalid', 'true'); $('#ini-input').classList.add('invalid'); $('#ini-input').focus(); };
+    if (!/^[A-Z0-9]{1,4}$/.test(ini)) return fail('Use 1–4 letters or numbers, with no spaces.');
+    if (ini === String(p.initials).toUpperCase()) { closeModal(); return; }
+    const clash = state.profiles.find((x) => x.id !== id && String(x.initials).toUpperCase() === ini);
+    if (clash) return fail(`${ini} is already used${clash.display_name && clash.display_name.toUpperCase() !== ini ? ' by ' + clash.display_name : ''}.`);
+    const was = p.initials; const btn = f.querySelector('button[type="submit"]'); btn.disabled = true;
+    (async () => {
+      try { await store.adminSetInitials(id, ini); await loadData(); closeModal(); toast(`${was} is now ${ini}`); render(); }
+      catch (err) { btn.disabled = false; fail(err.message); }
+    })();
   } else if (f.id === 'name-form') {
     const name = $('#me-name').value.trim(); if (!name) { toast('Enter a display name.'); return; }
     act(async () => { await store.updateProfile({ display_name: name }); await loadData(); toast('Saved'); render(); });
