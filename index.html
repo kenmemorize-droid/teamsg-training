@@ -268,7 +268,7 @@ const CONFIG = {
 <script>
 'use strict';
 /* ---------------- Version (same in the demo and the live build) ---------------- */
-const APP_VERSION = '2026-10-24-f5a3d7';
+const APP_VERSION = '2026-10-24-209be0';
 /* ---------------- Utilities ---------------- */
 const TZ = 'Asia/Singapore';
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -1431,6 +1431,7 @@ class DemoStore {
   async signOut() { this.uid = null; ls.del(DEMO_USER); }
   async sendReset() { throw new Error('Password reset needs Supabase mode.'); }
   async setPassword() { /* no-op in demo */ }
+  async changePassword() { /* demo accounts have no passwords */ }
   async resetDemo() { this.db = buildDemoDb(); this.proofs = {}; this.save(); }
   async loadAll() {
     const db = this.db; const mine = new Set(db.attempts.filter((a) => a.athlete_id === this.uid).map((a) => a.id));
@@ -1536,6 +1537,16 @@ class SupabaseStore {
   async signOut() { await this.sb.auth.signOut(); this.uid = null; }
   async sendReset(email) { this.check(await this.sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname })); }
   async setPassword(password) { this.check(await this.sb.auth.updateUser({ password })); }
+  /* Change password: confirm the current one first, then set the new one */
+  async changePassword(current, next) {
+    const u = await this.sb.auth.getUser();
+    const email = u.data && u.data.user && u.data.user.email;
+    if (!email) throw new Error('Sign in again, then try once more.');
+    const r = await this.sb.auth.signInWithPassword({ email, password: current });
+    if (r.error) throw new Error(r.error.status === 429 ? 'Too many attempts. Wait a few minutes and try again.' : 'Your current password isn’t right.');
+    const up = await this.sb.auth.updateUser({ password: next });
+    if (up.error) throw new Error(/different/i.test(up.error.message) ? 'The new password must be different from the current one.' : up.error.message);
+  }
   async all(table, order) {
     const out = [];
     for (let from = 0; ; from += 1000) {
@@ -2354,6 +2365,13 @@ function viewMe() {
       <form id="name-form" class="field"><label for="me-name">Display name</label><div style="display:flex;gap:8px"><input id="me-name" class="input" value="${esc(me.display_name || '')}" maxlength="40" autocomplete="nickname"><button class="btn" type="submit">Save</button></div><span class="hint">Initials (${esc(me.initials)}) are set by the admin.</span></form>
       <label class="check"><input id="me-board" type="checkbox"${me.show_on_leaderboard !== false ? ' checked' : ''}> Show me on leaderboards</label>
     </section>
+    ${store.isDemo ? '' : `<section class="section"><h2>Password</h2>
+      <form id="password-change-form" class="stack" style="gap:12px;margin-top:8px" novalidate>
+        <div class="field"><label for="pw-current">Current password</label><input id="pw-current" class="input" type="password" autocomplete="current-password"><span class="field-err" id="pw-err-current" role="alert"></span></div>
+        <div class="field"><label for="pw-new">New password</label><input id="pw-new" class="input" type="password" autocomplete="new-password"><span class="hint">At least 8 characters.</span><span class="field-err" id="pw-err-new" role="alert"></span></div>
+        <div class="field"><label for="pw-repeat">Repeat new password</label><input id="pw-repeat" class="input" type="password" autocomplete="new-password"><span class="field-err" id="pw-err-repeat" role="alert"></span></div>
+        <div><button class="btn" type="submit">Change password</button></div>
+      </form></section>`}
     <section class="section stack"><h2>Memory systems</h2><p class="small muted" style="margin:0">Used to check the codes you enter as wrong items.</p>${emsRows}</section>
     <section class="section stack"><h2>Rival</h2>
       <div class="field"><label for="me-rival">Head-to-head with</label><select id="me-rival" class="input">${opt('', 'No rival', !me.rival_id)}${state.profiles.filter((p) => p.active && p.id !== me.id).map((p) => opt(p.id, `${p.initials} – ${p.display_name}`, p.id === me.rival_id)).join('')}</select></div></section>
@@ -2598,6 +2616,10 @@ document.addEventListener('change', (e) => {
   if (t.id === 'tg-ath') { ui.admin.tgAthlete = t.value; return; }
   if (t.id === 'fm-event') { ui.admin.fmEvent = t.value; render(); }
 });
+document.addEventListener('input', (e) => {
+  const m = /^pw-(current|new|repeat)$/.exec(e.target.id || '');
+  if (m) { const msg = document.getElementById('pw-err-' + m[1]); if (msg) msg.textContent = ''; e.target.removeAttribute('aria-invalid'); e.target.classList.remove('invalid'); }
+});
 const ERR_KEY = { 'f-time-min': 'time', 'f-time-sec': 'time', 'f-correct': 'correct', 'f-total': 'correct', 'f-interval': 'interval', 'f-date': 'date', 'f-format': 'format' };
 document.addEventListener('input', (e) => {
   const key = ERR_KEY[e.target.id];
@@ -2631,6 +2653,27 @@ document.addEventListener('submit', (e) => {
     if (p1.length < 8) { ui.loginMsg = 'Use at least 8 characters.'; render(); return; }
     if (p1 !== p2) { ui.loginMsg = 'The passwords don’t match.'; render(); return; }
     act(async () => { await store.setPassword(p1); ui.needsPassword = false; ui.loginMsg = ''; toast('Password saved'); await afterSignIn(); });
+  } else if (f.id === 'password-change-form') {
+    const cur = $('#pw-current').value, nw = $('#pw-new').value, rp = $('#pw-repeat').value;
+    const errs = {};
+    if (!cur) errs.current = 'Enter your current password.';
+    if (nw.length < 8) errs.new = 'Use at least 8 characters.';
+    else if (nw === cur) errs.new = 'The new password must be different from the current one.';
+    if (!errs.new && rp !== nw) errs.repeat = 'The two new passwords don’t match.';
+    for (const k of ['current', 'new', 'repeat']) {
+      const msg = $('#pw-err-' + k); const inp = $('#pw-' + k);
+      msg.textContent = errs[k] || ''; if (errs[k]) { inp.setAttribute('aria-invalid', 'true'); inp.setAttribute('aria-describedby', 'pw-err-' + k); inp.classList.add('invalid'); } else { inp.removeAttribute('aria-invalid'); inp.classList.remove('invalid'); }
+    }
+    if (Object.keys(errs).length) { const first = ['current', 'new', 'repeat'].find((k) => errs[k]); $('#pw-' + first).focus(); return; }
+    act(async () => {
+      try {
+        await store.changePassword(cur, nw);
+        f.reset(); toast('Password changed');
+      } catch (err) {
+        const msg = $('#pw-err-current'); const inp = $('#pw-current');
+        msg.textContent = err.message; inp.setAttribute('aria-invalid', 'true'); inp.classList.add('invalid'); inp.focus();
+      }
+    });
   } else if (f.id === 'name-form') {
     const name = $('#me-name').value.trim(); if (!name) { toast('Enter a display name.'); return; }
     act(async () => { await store.updateProfile({ display_name: name }); await loadData(); toast('Saved'); render(); });
