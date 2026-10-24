@@ -165,6 +165,10 @@ tr:last-child td{border-bottom:0}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .hscroll{overflow-x:auto}
 .err{color:var(--red);font-size:14px;font-weight:600}
+.field-err{color:var(--red);font-size:13px;font-weight:600}
+.input.invalid,.chipbox.invalid{border-color:var(--red);box-shadow:0 0 0 1px var(--red)}
+.err-summary{padding:10px 14px;border-radius:10px;background:var(--red-soft);color:var(--red-ink);font-size:14px}
+.err-summary ul{margin:4px 0 0;padding-left:18px}
 .hero .bar{background:rgba(255,255,255,.18)}
 .hero .bar>span{background:var(--gold)}
 .heat{display:grid;gap:3px}
@@ -216,6 +220,23 @@ tr:last-child td{border-bottom:0}
 .proof-preview{display:flex;align-items:center;gap:10px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
 .proof-preview img{width:56px;height:56px;object-fit:cover;border-radius:6px}
 .paste-target{min-height:40px;font-size:13px;color:var(--muted)}
+.grid-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+.grid-inner{width:100%}
+.grid-row{display:grid;grid-template-columns:46px repeat(var(--cols,10),minmax(64px,1fr));gap:4px;align-items:center;margin-top:4px;border-radius:10px}
+.grid-row.me,.grid-row.me .gl{background:var(--green-soft)}
+.gl{position:sticky;left:0;z-index:2;background:var(--bg);height:44px;display:flex;align-items:center;padding-left:4px;border-radius:10px 0 0 10px}
+.ghead{text-align:center;font-size:11px;font-weight:700;line-height:1.1;min-height:38px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:2px}
+.ghead span:first-child{font-size:15px}
+.gcell{height:44px;padding:0;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font-family:var(--num);font-weight:700;font-size:20px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.gcell.empty{border-style:dashed;background:transparent;color:var(--muted);font-weight:600;cursor:default}
+.gcell.pending{border-style:dashed;border-color:var(--gold-ink)}
+.gcell.m1,.gcell.m2,.gcell.m3{border-color:transparent;color:#1B2A41}
+.gcell.m1,.grid-key i.m1{background:#EBCB5A}
+.gcell.m2,.grid-key i.m2{background:#CFD5DC}
+.gcell.m3,.grid-key i.m3{background:#DDA06A}
+.grid-key{display:flex;gap:14px;margin-top:12px;font-size:12px;font-weight:600}
+.grid-key span{display:inline-flex;align-items:center;gap:5px}
+.grid-key i{width:14px;height:14px;border-radius:4px;display:inline-block}
 .medal-sm{width:36px;height:36px;flex:none;border-radius:18px;display:flex;align-items:center;justify-content:center}
 .recap-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
 .modal-backdrop{position:fixed;inset:0;z-index:30;background:rgba(14,21,32,.55);display:flex;align-items:center;justify-content:center;padding:20px}
@@ -246,6 +267,8 @@ const CONFIG = {
 </script>
 <script>
 'use strict';
+/* ---------------- Version (same in the demo and the live build) ---------------- */
+const APP_VERSION = '2026-10-24-f5a3d7';
 /* ---------------- Utilities ---------------- */
 const TZ = 'Asia/Singapore';
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -1640,7 +1663,7 @@ Object.assign(SupabaseStore.prototype, {
 /* ---------------- UI state ---------------- */
 const ui = {
   route: 'today', param: null, logPreset: null, stack: [], expectHash: null, needsPassword: false, fatal: null, loginView: 'signin', loginMsg: '',
-  boards: { period: 'month', mode: 'raw', eventId: 'speed_card', formatId: null, pctEvent: 'overall', impEvent: 'overall' },
+  boards: { period: 'month', eventId: null, formatId: null },
   progress: { athleteId: null, eventId: null, formatId: null, range: 30, calMonth: null, limit: 20, calOpen: false },
   log: null,
   admin: { tab: 'review', audit: null, tgEvent: 'speed_card', tgAthlete: null, fmEvent: 'speed_card' }
@@ -1703,7 +1726,7 @@ function kudosBtn(a) {
 
 /* ---------------- Views: sign-in ---------------- */
 function viewLogin() {
-  const head = `<div class="stack" style="gap:6px"><div class="wordmark">Team SG<br>Training</div><div class="muted">Memory training log for the national team</div></div>`;
+  const head = `<div class="stack" style="gap:6px"><div class="wordmark">Team SG<br>Training</div><div class="muted">Memory training log for the national team</div><div class="tiny muted">Version ${esc(APP_VERSION)}</div></div>`;
   if (ui.fatal) return `<main class="login">${head}<div class="notice" role="alert">${esc(ui.fatal)}</div></main>`;
   if (store.isDemo) {
     const ps = state.profiles.length ? state.profiles : store.db.profiles;
@@ -1879,23 +1902,29 @@ function viewLog() {
   const tiles = recentEventIds(state.me.id).map((id) => state.eventsById[id]).filter(Boolean)
     .map((e) => `<button type="button" class="tile" data-act="log-event" data-id="${e.id}" aria-pressed="${e.id === L.eventId}">${esc(e.name)}${e.id === eotwId ? '<span class="tile-tag">2× XP</span>' : ''}</button>`).join('');
   let fields = '';
+  // inline validation: message under the field, red border, and aria-invalid on the input
+  const errs = L.errs || {};
+  const fe = (key) => (errs[key] ? `<span class="field-err" id="err-${key}" role="alert">${esc(errs[key])}</span>` : '');
+  const inv = (key) => (errs[key] ? ` aria-invalid="true" aria-describedby="err-${key}"` : '');
+  const ic = (key) => (errs[key] ? ' invalid' : '');
+  const deck = (state.formatsById[L.formatId] && state.formatsById[L.formatId].item_count) || 52;
   const timeBox = (label, optional) => { const t = splitTime(L.time); return `<div class="field"><span class="label" id="time-label">${label}${optional ? ' <span class="muted" style="font-weight:400">(optional)</span>' : ''}</span>
-      <div class="time-in" role="group" aria-labelledby="time-label" aria-describedby="time-readout">
-        <input id="f-time-min" class="input big" inputmode="numeric" autocomplete="off" placeholder="0" aria-label="Minutes" value="${esc(t.min)}"><span>min</span>
-        <input id="f-time-sec" class="input big" inputmode="decimal" autocomplete="off" placeholder="${k === 'time' ? '35.7' : '00'}" aria-label="Seconds" value="${esc(t.sec)}"><span>sec</span></div>
-      <span class="hint" id="time-readout">${esc(timeReadout(t.min, t.sec))}</span></div>`; };
+      <div class="time-in" role="group" aria-labelledby="time-label">
+        <input id="f-time-min" class="input big${ic('time')}" inputmode="numeric" autocomplete="off" placeholder="0" aria-label="Minutes" value="${esc(t.min)}"${inv('time')}><span>min</span>
+        <input id="f-time-sec" class="input big${ic('time')}" inputmode="decimal" autocomplete="off" placeholder="${k === 'time' ? '35.7' : '00'}" aria-label="Seconds" value="${esc(t.sec)}"${inv('time')}><span>sec</span></div>
+      <span class="hint" id="time-readout">${esc(timeReadout(t.min, t.sec))}${k === 'time' ? ' · limit 5:00' : ''}</span>${fe('time')}</div>`; };
   if (k === 'time') {
     fields = `${timeBox('Time', false)}
-      <div class="field"><label for="f-correct">Cards correct</label><div class="unit-wrap"><input id="f-correct" class="input big" inputmode="numeric" placeholder="52" value="${esc(L.correct)}"><span>of</span><input id="f-total" class="input big" inputmode="numeric" aria-label="Total cards" style="max-width:88px" value="${esc(L.total)}"></div></div>`;
+      <div class="field"><label for="f-correct">Cards correct</label><div class="unit-wrap"><input id="f-correct" class="input big${ic('correct')}" inputmode="numeric" placeholder="${deck}" value="${esc(L.correct)}"${inv('correct')} style="max-width:160px"><span>of ${deck}</span></div>${fe('correct')}</div>`;
   } else if (k === 'count_at_interval') {
     fields = `<div class="grid3">
-      <div class="field"><label for="f-correct">Correct</label><input id="f-correct" class="input big" inputmode="numeric" value="${esc(L.correct)}"></div>
-      <div class="field"><label for="f-total">Out of</label><input id="f-total" class="input big" inputmode="numeric" placeholder="opt." value="${esc(L.total)}"></div>
-      <div class="field"><label for="f-interval">Seconds/digit</label><input id="f-interval" class="input big" inputmode="decimal" value="${esc(L.interval)}"></div></div>`;
+      <div class="field"><label for="f-correct">Correct</label><input id="f-correct" class="input big${ic('correct')}" inputmode="numeric" value="${esc(L.correct)}"${inv('correct')}></div>
+      <div class="field"><label for="f-total">Out of</label><input id="f-total" class="input big${ic('correct')}" inputmode="numeric" placeholder="opt." value="${esc(L.total)}"></div>
+      <div class="field"><label for="f-interval">Seconds/digit</label><input id="f-interval" class="input big${ic('interval')}" inputmode="decimal" value="${esc(L.interval)}"${inv('interval')}></div></div>${fe('correct')}${fe('interval')}`;
   } else {
     fields = `<div class="grid2">
-      <div class="field"><label for="f-correct">Correct</label><input id="f-correct" class="input big" inputmode="numeric" value="${esc(L.correct)}"></div>
-      <div class="field"><label for="f-total">Out of</label><input id="f-total" class="input big" inputmode="numeric" placeholder="opt." value="${esc(L.total)}"></div></div>
+      <div class="field"><label for="f-correct">Correct</label><input id="f-correct" class="input big${ic('correct')}" inputmode="numeric" value="${esc(L.correct)}"${inv('correct')}></div>
+      <div class="field"><label for="f-total">Out of</label><input id="f-total" class="input big${ic('correct')}" inputmode="numeric" placeholder="opt." value="${esc(L.total)}"></div></div>${fe('correct')}
       ${TIME_USED_EVENTS.includes(ev.id) ? timeBox('Time used', true) : ''}`;
   }
   let wrong = '';
@@ -1909,9 +1938,9 @@ function viewLog() {
           : fam.kinds.map(([kk, l]) => `<button type="button" class="chip" data-act="ems-quick" data-kind="${kk}">${esc(l)}</button>`).join('')}</div></div></div>`;
     } else {
       wrong = `<div class="field"><label for="f-wrong">${unit === 'cards' ? 'Cards' : 'Items'} you got wrong <span class="muted" style="font-weight:400">(${esc(systemLabel(sys))})</span></label>
-        <div class="chipbox">${L.wrong.map((c, i) => `<span class="code-chip">${esc(c)}<button type="button" data-act="remove-wrong" data-i="${i}" aria-label="Remove ${esc(c)}">×</button></span>`).join('')}
-        <input id="f-wrong" autocomplete="off" autocapitalize="characters" placeholder="Add, ${esc(codeHint(sys))}" aria-describedby="wrong-hint"></div>
-        <span id="wrong-hint" class="hint">Press space or Enter after each code.</span>${L.wrongErr ? `<span class="err" role="alert">${esc(L.wrongErr)}</span>` : ''}</div>`;
+        <div class="chipbox${ic('wrong')}">${L.wrong.map((c, i) => `<span class="code-chip">${esc(codeLabel(c, sys))}<button type="button" data-act="remove-wrong" data-i="${i}" aria-label="Remove ${esc(codeLabel(c, sys))}">×</button></span>`).join('')}
+        <input id="f-wrong" autocomplete="off" autocapitalize="characters" placeholder="Add, ${esc(codeHint(sys))}" aria-describedby="wrong-hint"${errs.wrong ? ' aria-invalid="true"' : ''}></div>
+        <span id="wrong-hint" class="hint">${sys.kind.startsWith('cards') ? 'Rank A, 2–10, J, Q or K, then suit D, C, H or S. ' : ''}Press space or Enter after each code.</span>${L.wrongErr ? `<span class="field-err" role="alert">${esc(L.wrongErr)}</span>` : ''}${fe('wrong')}</div>`;
     }
   }
   const editing = !!L.editingId;
@@ -1920,8 +1949,8 @@ function viewLog() {
     <form id="log-form" class="section stack" style="gap:18px" novalidate>
       <fieldset style="border:0;margin:0;padding:0"><legend class="label" style="margin-bottom:8px">Event</legend><div class="tiles">${tiles}</div></fieldset>
       <div class="grid2">
-        <div class="field"><label for="f-format">Format</label><select id="f-format" class="input">${fmts.map((f) => opt(f.id, f.name, f.id === L.formatId)).join('')}</select></div>
-        <div class="field"><label for="f-date">Date</label><input id="f-date" class="input" type="date" value="${esc(L.date)}" max="${today}"${isAdmin() ? '' : ` min="${addDays(today, -7)}"`}></div>
+        <div class="field"><label for="f-format">Format</label><select id="f-format" class="input${ic('format')}"${inv('format')}>${fmts.map((f) => opt(f.id, f.name, f.id === L.formatId)).join('')}</select>${fe('format')}</div>
+        <div class="field"><label for="f-date">Date</label><input id="f-date" class="input${ic('date')}" type="date" value="${esc(L.date)}" max="${today}"${isAdmin() ? '' : ` min="${addDays(today, -7)}"`}${inv('date')}>${fe('date')}</div>
       </div>
       ${ghostBox(state.me.id, L.formatId)}
       ${fields}
@@ -1929,7 +1958,7 @@ function viewLog() {
       <div class="field"><label for="f-note">Note <span class="muted" style="font-weight:400">(optional)</span></label><textarea id="f-note" class="input" rows="2" placeholder="e.g. lost focus at card 30">${esc(L.note)}</textarea></div>
       <label class="check"><input id="f-abandoned" type="checkbox"${L.abandoned ? ' checked' : ''}> Didn’t finish – counts for my streak, not for scores</label>
       ${proofPicker('f-proof', L.file, 'log')}
-      <div id="log-err" class="err" role="alert">${esc(L.err)}</div>
+      <div id="log-err" role="alert">${Object.keys(errs).length ? `<div class="err-summary"><b>${Object.keys(errs).length === 1 ? 'Fix this before saving:' : `Fix these ${Object.keys(errs).length} things before saving:`}</b><ul>${Object.values(errs).map((m) => `<li>${esc(m)}</li>`).join('')}</ul></div>` : ''}${L.err ? `<div class="err">${esc(L.err)}</div>` : ''}</div>
       <div class="grid2" style="padding-bottom:8px">
         ${editing
           ? `<a class="btn" href="#/attempt/${esc(L.editingId)}">Cancel</a><button type="button" class="btn primary" data-act="save-log">Save changes</button>`
@@ -1985,27 +2014,73 @@ function spokenFormatFor(interval, currentId) {
   const m = formatsFor('spoken', currentId).find((f) => Number(f.interval_seconds) === Number(interval));
   return m ? m.id : currentId;
 }
-function rowFromFields() {
-  const L = ui.log; const k = kindOf(L.eventId);
-  const correct = numOrNull(L.correct), total = numOrNull(L.total), interval = numOrNull(L.interval);
-  if (L.time === 'invalid') return 'Check the time: minutes must be a whole number, and seconds under 60 when minutes are used.';
-  const time = L.time === '' || L.time == null ? null : Number(L.time);
-  if (Number.isNaN(time)) return 'Check the time.';
-  if ([correct, total, interval].some((v) => Number.isNaN(v))) return 'Scores must be numbers.';
-  if ([correct, total].some((v) => v != null && (v < 0 || !Number.isInteger(v)))) return 'Scores must be whole numbers.';
-  if (k === 'time' && correct == null && time == null) return 'Enter a time or the number of cards correct.';
-  if (k !== 'time' && correct == null) return 'Enter the score.';
-  if (correct != null && total != null && correct > total) return 'Correct can’t be higher than the total.';
-  const tot = total ?? (k === 'time' ? 52 : null);
-  return { event_id: L.eventId, format_id: k === 'count_at_interval' ? spokenFormatFor(interval, L.formatId) : L.formatId, practiced_on: L.date, items_correct: correct ?? (k === 'time' ? tot : null), items_total: tot, time_seconds: time, interval_seconds: k === 'count_at_interval' ? interval : null, note: (L.note || '').trim(), is_valid: !L.abandoned };
+/* Card codes: rank A, 2–9, T (shown as 10), J, Q, K + suit D, C, H, S */
+const CARD_RX = /(?:A|[2-9]|T|J|Q|K)[SHDC]/g;
+const codeLabel = (c, sys) => (sys && sys.kind.startsWith('cards') ? c.replace(/T(?=[SHDC])/g, '10') : c);
+function cardsIn(codes) { const out = []; for (const c of codes) out.push(...(c.match(CARD_RX) || [])); return out; }
+function firstDuplicateCard(codes) { const seen = new Set(); for (const c of cardsIn(codes)) { if (seen.has(c)) return c; seen.add(c); } return null; }
+function badCodeMessage(bad, sys) {
+  const list = bad.map((b) => `“${b}”`).join(', '); const many = bad.length > 1;
+  if (sys.kind === 'cards_1') return `${list} ${many ? 'aren’t cards' : 'isn’t a card'}. Use rank A, 2–10, J, Q or K, then suit D, C, H or S (e.g. 7H, 10S, KD).`;
+  if (sys.kind === 'cards_2') return `${list} ${many ? 'aren’t card pairs' : 'isn’t a card pair'}. Write two cards together, each rank A, 2–10, J, Q or K plus suit D, C, H or S (e.g. KS3H).`;
+  return `${list} ${many ? 'aren’t valid codes' : 'isn’t a valid code'} for ${systemLabel(sys)} (${codeHint(sys)}).`;
+}
+/* Validate the Log form. Returns { errs } keyed by field, plus { row } when everything is valid. */
+function validateLog() {
+  const L = ui.log; const ev = state.eventsById[L.eventId]; const k = ev.result_kind; const errs = {};
+  const fmt = state.formatsById[L.formatId]; const today = TODAY();
+  if (!fmt) errs.format = 'Choose a format.';
+  if (!L.date) errs.date = 'Choose a date.';
+  else if (!isAdmin() && (L.date > today || L.date < addDays(today, -7))) errs.date = 'The date must be within the last 7 days.';
+  const correct = numOrNull(L.correct); const interval = numOrNull(L.interval);
+  const total = k === 'time' ? ((fmt && fmt.item_count) || 52) : numOrNull(L.total);
+  let time = null;
+  if (L.time === 'invalid') errs.time = 'Minutes must be a whole number, and seconds under 60 when minutes are used.';
+  else if (L.time !== '' && L.time != null) { time = Number(L.time); if (Number.isNaN(time)) errs.time = 'Enter the time as numbers.'; }
+  if (!errs.time && k === 'time' && time != null && (time < 1 || time > 300)) errs.time = 'Speed Card time must be between 0:01 and 5:00.';
+  if (Number.isNaN(correct) || Number.isNaN(total)) errs.correct = 'Scores must be numbers.';
+  else if ([correct, total].some((v) => v != null && (v < 0 || !Number.isInteger(v)))) errs.correct = 'Scores must be whole numbers.';
+  else if (k === 'time' && correct == null && time == null) { if (!errs.time) errs.time = 'Enter a time or the number of cards correct.'; }
+  else if (k !== 'time' && correct == null) errs.correct = 'Enter the score.';
+  else if (correct != null && total != null && correct > total) errs.correct = k === 'time' ? `Cards correct can’t be more than ${total}.` : 'Correct can’t be higher than the total.';
+  if (Number.isNaN(interval)) errs.interval = 'Enter the seconds per digit as a number.';
+  const sys = ev.ems_kind ? myEms(ev.ems_kind) : null;
+  if (sys && L.wrong.length && !errs.correct) {
+    const unit = UNIT[ev.id] || 'items'; const one = unit.replace(/s$/, '');
+    const got = correct;
+    if (k === 'time' && correct == null) errs.wrong = 'Enter how many cards you got right, so the wrong cards add up.';
+    else if (total != null && got != null) {
+      const missed = total - got;
+      if (missed === 0) errs.wrong = `Everything was correct, so there are no wrong ${unit} to list. Remove them or change the score.`;
+      else if (L.wrong.length > missed) errs.wrong = `You listed ${L.wrong.length} wrong ${unit}, but only ${missed} ${missed === 1 ? one + ' was' : unit + ' were'} missed (${total} − ${got}).`;
+    }
+    if (!errs.wrong && ev.id === 'speed_card') { const dup = firstDuplicateCard(L.wrong); if (dup) errs.wrong = `${codeLabel(dup, sys)} is listed twice. Each card appears only once in a deck.`; }
+  }
+  if (Object.keys(errs).length) return { errs };
+  return { errs, row: { event_id: L.eventId, format_id: k === 'count_at_interval' ? spokenFormatFor(interval, L.formatId) : L.formatId, practiced_on: L.date, items_correct: correct ?? (k === 'time' ? total : null), items_total: total, time_seconds: time, interval_seconds: k === 'count_at_interval' ? interval : null, note: (L.note || '').trim(), is_valid: !L.abandoned } };
+}
+function focusFirstError(errs) {
+  const ID = { format: 'f-format', date: 'f-date', time: 'f-time-sec', correct: 'f-correct', interval: 'f-interval', wrong: 'f-wrong' };
+  for (const key of ['format', 'date', 'time', 'correct', 'interval', 'wrong']) {
+    if (errs[key]) { const el = document.getElementById(ID[key]); if (el) { el.focus({ preventScroll: true }); try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { /* ignore */ } } return; }
+  }
 }
 function logErr(msg) { if (ui.log) ui.log.err = msg; const el = $('#log-err'); if (el) { el.textContent = msg; el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } }
 function commitWrong() {
   const input = $('#f-wrong'); if (!input || !input.value.trim()) return false;
   const ev = state.eventsById[ui.log.eventId]; const sys = myEms(ev.ems_kind);
-  const bad = [];
-  for (const t of input.value.split(/[\s,;]+/).filter(Boolean)) { const c = normalizeCode(t, sys); if (c) ui.log.wrong.push(c); else bad.push(t); }
-  ui.log.wrongErr = bad.length ? `${bad.map((b) => `“${b}”`).join(', ')} ${bad.length > 1 ? "aren’t valid codes" : "isn’t a valid code"} for ${systemLabel(sys)} (${codeHint(sys)}).` : '';
+  const bad = [], dups = [];
+  for (const t of input.value.split(/[\s,;]+/).filter(Boolean)) {
+    const c = normalizeCode(t, sys);
+    if (!c) { bad.push(t); continue; }
+    if (ev.id === 'speed_card' && firstDuplicateCard(ui.log.wrong.concat(c))) { dups.push(codeLabel(c, sys)); continue; }
+    ui.log.wrong.push(c);
+  }
+  const msgs = [];
+  if (bad.length) msgs.push(badCodeMessage(bad, sys));
+  if (dups.length) msgs.push(`${dups.join(', ')} ${dups.length > 1 ? 'are' : 'is'} already listed. Each card appears only once in a deck.`);
+  ui.log.wrongErr = msgs.join(' ');
+  if (ui.log.errs) delete ui.log.errs.wrong;
   input.value = '';
   syncLog(); render(); const again = $('#f-wrong'); if (again) again.focus();
   return true;
@@ -2013,12 +2088,9 @@ function commitWrong() {
 async function saveLog(another) {
   commitWrongSilently(); syncLog();
   const L = ui.log; const ev = state.eventsById[L.eventId];
-  if (!L.formatId || !state.formatsById[L.formatId]) return logErr('Choose a format.');
-  if (!L.date) return logErr('Choose a date.');
-  const today = TODAY();
-  if (!isAdmin() && (L.date > today || L.date < addDays(today, -7))) return logErr('The date must be within the last 7 days.');
-  const r = rowFromFields(); if (typeof r === 'string') return logErr(r);
-  const rows = [r];
+  const v = validateLog(); L.errs = v.errs; L.err = '';
+  if (!v.row) { render(); focusFirstError(v.errs); return; }
+  const rows = [v.row];
   const sys = ev.ems_kind ? myEms(ev.ems_kind) : null;
   const errRows = rows.length === 1 && sys ? L.wrong.map((c) => ({ item_code: c, ems_system_id: sys.id })) : [];
   setBusy(true);
@@ -2045,7 +2117,10 @@ async function saveLog(another) {
 function commitWrongSilently() {
   const input = $('#f-wrong'); if (!input || !input.value.trim()) return;
   const ev = state.eventsById[ui.log.eventId]; const sys = myEms(ev.ems_kind);
-  for (const t of input.value.split(/[\s,;]+/).filter(Boolean)) { const c = normalizeCode(t, sys); if (c) ui.log.wrong.push(c); }
+  for (const t of input.value.split(/[\s,;]+/).filter(Boolean)) {
+    const c = normalizeCode(t, sys);
+    if (c && !(ev.id === 'speed_card' && firstDuplicateCard(ui.log.wrong.concat(c)))) ui.log.wrong.push(c);
+  }
   input.value = '';
 }
 </script>
@@ -2143,7 +2218,7 @@ function viewProgress() {
       ${self ? '<a class="btn sm" href="#/recap" style="align-self:flex-start">Monthly recap</a>' : ''}
 
     </header>
-    ${!used.length ? `<div class="section"><div class="empty">${self ? 'No attempts yet. <a href="#/log">Log your first one</a>.' : 'No attempts yet.'}</div></div>` : `
+    ${!used.length ? `<div class="section" style="padding-bottom:0"><div class="empty">${self ? 'No attempts yet. <a href="#/log">Log your first one</a>.' : 'No attempts yet.'}</div></div>` : ''}${`
     <div class="section grid2" style="align-items:end">
       <div class="field"><label for="prog-event-select">Discipline</label><select id="prog-event-select" class="input">${evList.map((id) => opt(id, state.eventsById[id].name, id === P.eventId)).join('')}</select></div>
       <div class="field"><label for="prog-format">Format</label><select id="prog-format" class="input">${fIds.map((id) => opt(id, `${fmtName(id)} (${fc[id] || 0})`, id === P.formatId)).join('')}</select></div>
@@ -2168,32 +2243,84 @@ function viewProgress() {
 }
 
 /* ---------------- View: Leaderboards ---------------- */
+/* ---- This month: team grid (raw best per discipline; gold, silver, bronze mark the top 3 in each column) ---- */
+const GRID_SHORT = { names_faces: 'Names', binary: 'Binary', images: 'Images', speed_number: 'Speed No.', long_card: 'Long Cards', dates: 'Dates', long_number: 'Long No.', words: 'Words', spoken: 'Spoken', speed_card: 'Speed Card' };
+const MEDAL_NAME = ['', 'gold', 'silver', 'bronze'];
+function teamEventCounts(range) {
+  const counts = {};
+  for (const p of boardAthletes()) for (const a of attemptsOf(p.id)) if (effortOk(a) && inRange(a.practiced_on, range)) counts[a.event_id] = (counts[a.event_id] || 0) + 1;
+  return counts;
+}
+/* Columns: most trained discipline (team-wide attempts this month) on the left */
+function gridColumns(range) {
+  const counts = teamEventCounts(range);
+  return state.events.slice().sort((x, y) => (counts[y.id] || 0) - (counts[x.id] || 0) || x.sort_order - y.sort_order);
+}
+/* Which attempts count in a column: the discipline's standard format (Spoken: 1 s per digit or faster) */
+function gridAttemptTest(ev) {
+  if (ev.id === 'spoken') return (a) => a.event_id === 'spoken' && (a.interval_seconds ?? state.formatsById[a.format_id]?.interval_seconds ?? 99) <= 1;
+  const fid = defaultFormatFor(ev.id);
+  return (a) => a.format_id === fid;
+}
+const gridLabel = (ev, v) => (ev.result_kind === 'time' ? fmtTime(v).replace(' s', 's') : trimNum(v, 1));
+function boardGridHTML() {
+  const range = periodRange('month'); const cols = gridColumns(range);
+  const me = state.me.id;
+  const athletes = boardAthletes().sort((x, y) => (y.id === me) - (x.id === me) || (x.initials || '').localeCompare(y.initials || ''));
+  const cell = {}; let any = false;
+  for (const ev of cols) {
+    const test = gridAttemptTest(ev); const kind = ev.result_kind; const results = [];
+    for (const p of athletes) {
+      const list = attemptsOf(p.id).filter((a) => a.event_id === ev.id && perf(a) && test(a) && inRange(a.practiced_on, range) && metric(a) != null);
+      const ok = bestAttempt(list.filter((a) => a.status !== 'pending_review'));
+      const best = ok || bestAttempt(list.filter((a) => a.status === 'pending_review'));
+      if (best) results.push({ p, v: metric(best), pending: !ok });
+    }
+    // flagged results wait for verification before they can take a medal
+    const ranked = results.filter((r) => !r.pending).sort((x, y) => (better(kind, x.v, y.v) ? -1 : better(kind, y.v, x.v) ? 1 : 0));
+    let rank = 0, prev = null;
+    ranked.forEach((r, i) => { if (prev === null || r.v !== prev) { rank = i + 1; prev = r.v; } r.rank = rank; });
+    for (const r of results) { cell[r.p.id + '|' + ev.id] = r; any = true; }
+  }
+  if (!any) return `<div class="empty">No results this month yet. <a href="#/log">Log an attempt</a> to get on the board.</div>`;
+  const head = `<div class="grid-row"><div class="gl"></div>${cols.map((ev) => `<div class="ghead"><span aria-hidden="true">${DISCIPLINE_EMOJI[ev.id] || ''}</span><span>${esc(GRID_SHORT[ev.id] || ev.name)}</span></div>`).join('')}</div>`;
+  const rows = athletes.map((p) => {
+    const isMe = p.id === me;
+    const cells = cols.map((ev) => {
+      const r = cell[p.id + '|' + ev.id];
+      if (!r) return `<div class="gcell empty" role="text" aria-label="${esc(p.initials)}, ${esc(ev.name)}: no result this month">–</div>`;
+      const medal = !r.pending && r.rank <= 3 ? r.rank : 0;
+      const label = `${p.initials}, ${ev.name}: ${gridLabel(ev, r.v)}${medal ? ', ' + MEDAL_NAME[medal] : ''}${r.pending ? ', waiting for verification' : ''}. Opens progress.`;
+      return `<button type="button" class="gcell${medal ? ' m' + medal : ''}${r.pending ? ' pending' : ''}" data-act="grid-open" data-ath="${esc(p.id)}" data-ev="${esc(ev.id)}" aria-label="${esc(label)}">${esc(gridLabel(ev, r.v))}</button>`;
+    }).join('');
+    return `<div class="grid-row${isMe ? ' me' : ''}"><div class="gl"><a class="avatar sm" href="#/profile/${esc(p.id)}" aria-label="${esc(p.display_name || p.initials)}${isMe ? ' (you)' : ''}, profile">${esc(p.initials)}</a></div>${cells}</div>`;
+  }).join('');
+  return `<p class="tiny muted" style="margin:0 0 8px">Best this month in each discipline’s standard format. Swipe sideways for more.</p>
+    <div class="grid-scroll" tabindex="0" role="region" aria-label="Best results this month, scrolls sideways"><div class="grid-inner" style="min-width:${46 + 4 + cols.length * 68}px;--cols:${cols.length}">${head}${rows}</div></div>
+    <div class="grid-key"><span><i class="m1"></i>1st</span><span><i class="m2"></i>2nd</span><span><i class="m3"></i>3rd</span></div>`;
+}
+
 function viewBoards() {
   const B = ui.boards;
   if (B.period !== 'today' && B.period !== 'month') B.period = 'month';
-  if (B.mode !== 'raw' && B.mode !== 'imp') B.mode = 'raw';
-  const range = periodRange(B.period);
   const periods = [['today', 'Today'], ['month', 'This month']];
+  const hero = `<header class="hero" style="padding-bottom:0;gap:10px"><h1>Leaderboards</h1>
+      <div class="tabs" role="group" aria-label="Period" style="display:grid;grid-template-columns:repeat(2,1fr)">${periods.map(([p, l]) => `<button type="button" data-act="board-period" data-p="${p}" aria-pressed="${B.period === p}">${l}</button>`).join('')}</div></header>`;
+  if (B.period === 'month') return `<main class="shell">${hero}<section class="section" aria-label="This month">${boardGridHTML()}</section></main>`;
+  // ---- Today: raw best for one discipline and standard format, with the top 3 podium ----
+  const range = periodRange('today');
   const stdFormats = (eid) => state.formats.filter((f) => f.event_id === eid && f.is_standard);
-  let controls = '', rows = [], foot = '';
-  if (B.mode === 'raw') {
-    const evs = state.events.filter((e) => stdFormats(e.id).length);
-    if (!evs.some((e) => e.id === B.eventId)) B.eventId = evs[0]?.id;
-    const fl = stdFormats(B.eventId);
-    if (!fl.some((f) => f.id === B.formatId)) {
-      const cnt = (fid) => state.attempts.filter((a) => a.format_id === fid).length;
-      B.formatId = fl.slice().sort((a, b) => cnt(b.id) - cnt(a.id))[0]?.id;
-    }
-    controls = `<div class="grid2"><div class="field"><label for="board-event">Event</label><select id="board-event" class="input">${evs.map((e) => opt(e.id, e.name, e.id === B.eventId)).join('')}</select></div>
-      <div class="field"><label for="board-format">Standard format</label><select id="board-format" class="input">${fl.map((f) => opt(f.id, f.name, f.id === B.formatId)).join('')}</select></div></div>`;
-    rows = B.formatId ? boardRaw(B.period, B.eventId, B.formatId) : [];
-    foot = kindOf(B.eventId) === 'time' ? 'Only fully correct attempts in a standard format count. Faster ranks higher.' : 'Best attempt in this standard format during the period.';
-  } else {
-    const key = 'impEvent';
-    controls = `<div class="field"><label for="board-event2">Event</label><select id="board-event2" class="input" data-key="${key}">${opt('overall', 'Overall (average of events)', B[key] === 'overall')}${state.events.map((e) => opt(e.id, e.name, e.id === B[key])).join('')}</select></div>`;
-    rows = boardImprovement(B.period, B[key]);
-    foot = 'Best this period against the athlete’s median daily best over the 28 days before it. Needs 3 baseline attempts; capped at +50%.';
+  const evs = state.events.filter((e) => stdFormats(e.id).length);
+  if (!evs.some((e) => e.id === B.eventId)) {
+    const counts = teamEventCounts(periodRange('today')); const month = teamEventCounts(periodRange('month'));
+    B.eventId = evs.slice().sort((x, y) => (counts[y.id] || 0) - (counts[x.id] || 0) || (month[y.id] || 0) - (month[x.id] || 0) || x.sort_order - y.sort_order)[0]?.id;
   }
+  const fl = formatsFor(B.eventId).filter((f) => f.is_standard);
+  if (!fl.some((f) => f.id === B.formatId)) B.formatId = defaultFormatFor(B.eventId);
+  const controls = `<div class="grid2"><div class="field"><label for="board-event">Event</label><select id="board-event" class="input">${evs.map((e) => opt(e.id, e.name, e.id === B.eventId)).join('')}</select></div>
+      <div class="field"><label for="board-format">Standard format</label><select id="board-format" class="input">${fl.map((f) => opt(f.id, f.name, f.id === B.formatId)).join('')}</select></div></div>`;
+  const rows = B.formatId ? boardRaw('today', B.eventId, B.formatId) : [];
+  const foot = kindOf(B.eventId) === 'time' ? 'Only fully correct attempts in a standard format count. Faster ranks higher.' : 'Best attempt in this standard format during the period.';
   const me = state.me.id;
   const podium = rows.length >= 3 ? `<div class="podium" aria-hidden="true">${[1, 0, 2].map((i) => {
     const r = rows[i]; const h = ['96px', '72px', '56px'][i]; const bg = ['#C9A227', '#5B6575', '#8C5A2B'][i]; const fg = i === 0 ? '#1B2A41' : '#FFFFFF';
@@ -2205,15 +2332,9 @@ function viewBoards() {
         ${r.attempt && (r.attempt.status === 'pending_review' || r.attempt.status === 'verified') ? `<div class="tiny" style="margin-top:2px">${r.attempt.status === 'verified' ? '<span class="tag target">Verified</span>' : '<span class="tag gold">Unverified</span>'}</div>` : ''}</div>
       ${r.attempt && r.attempt.proof_path ? `<button type="button" class="kudos" data-act="view-proof" data-id="${esc(r.attempt.id)}" aria-label="View ${esc(r.p.initials)}’s GAMA screenshot" style="color:var(--green)">${ICONS.photo}</button>` : ''}
       <div class="big-val">${esc(r.display)}</div></div>`).join('')
-    : `<div class="empty">No results for this period yet. <a href="#/log">Log an attempt</a> to get on the board.</div>`;
-  return `<main class="shell">
-    <header class="hero" style="padding-bottom:0;gap:10px"><h1>Leaderboards</h1>
-      <div class="tabs" role="group" aria-label="Period" style="display:grid;grid-template-columns:repeat(${periods.length},1fr)">${periods.map(([p, l]) => `<button type="button" data-act="board-period" data-p="${p}" aria-pressed="${B.period === p}">${l}</button>`).join('')}</div></header>
-    <div class="section stack">
-      <div class="chips" role="group" aria-label="Ranking">${[['raw', 'Raw best'], ['imp', 'Improvement']].map(([m, l]) => `<button type="button" class="chip" data-act="board-mode" data-m="${m}" aria-pressed="${B.mode === m}">${l}</button>`).join('')}</div>
-      ${controls}
-      <div class="tiny muted">${esc(fmtShort(range[0]))}${range[0] !== range[1] ? ' – ' + esc(fmtShort(range[1])) : ''}</div>
-    </div>
+    : `<div class="empty">No results today yet. <a href="#/log">Log an attempt</a> to get on the board.</div>`;
+  return `<main class="shell">${hero}
+    <div class="section stack">${controls}<div class="tiny muted">${esc(fmtShort(range[0]))}</div></div>
     <section class="section" aria-label="Rankings" style="padding-top:0">${podium}<div style="padding-top:8px">${list}</div>
       <p class="tiny muted" style="margin:14px 0 0">${esc(foot)}</p></section>
   </main>`;
@@ -2244,6 +2365,7 @@ function viewMe() {
       ${store.isDemo ? '<button type="button" class="btn danger" data-act="demo-reset">Reset demo data</button>' : ''}
       <button type="button" class="btn" data-act="sign-out">Sign out</button>
     </section>
+    <p class="section tiny muted" style="text-align:center">Version ${esc(APP_VERSION)}</p>
   </main>`;
 }
 
@@ -2400,7 +2522,7 @@ document.addEventListener('click', (e) => {
     case 'sign-out': act(async () => { await store.signOut(); state.me = null; ui.log = null; ui.stack = []; navigate('#/today'); }); break;
     case 'demo-reset': askConfirm('Reset all demo data in this browser?', 'Reset', true).then((ok) => ok && act(async () => { await store.resetDemo(); await loadData(); ui.log = null; toast('Demo data reset'); render(); })); break;
     case 'log-event': syncLog(); ui.log = blankLog(id, { date: ui.log.date }); render(); break;
-    case 'remove-wrong': syncLog(); ui.log.wrong.splice(+el.dataset.i, 1); render(); break;
+    case 'remove-wrong': syncLog(); ui.log.wrong.splice(+el.dataset.i, 1); if (ui.log.errs) delete ui.log.errs.wrong; ui.log.wrongErr = ''; render(); break;
     case 'ems-quick': syncLog(); act(async () => { await store.saveEms(familyOf(el.dataset.kind), el.dataset.kind, null); await loadData(); render(); }); break;
     case 'ems-binary': {
       syncLog(); const n = parseInt($('#f-bits').value, 10);
@@ -2438,7 +2560,7 @@ document.addEventListener('click', (e) => {
       ui.progress.calMonth = d.toISOString().slice(0, 7); render(); break;
     }
     case 'board-period': ui.boards.period = el.dataset.p; render(); break;
-    case 'board-mode': ui.boards.mode = el.dataset.m; render(); break;
+    case 'grid-open': { const evId = el.dataset.ev; ui.progress.athleteId = el.dataset.ath; ui.progress.eventId = evId; ui.progress.formatId = defaultFormatFor(evId); ui.progress.limit = 20; navigate('#/progress'); break; }
     case 'ems-binary-save': {
       const v = $('#ems-binary').value.trim(); const n = parseInt(v, 10);
       if (v && !(n >= 1 && n <= 12)) { toast('Enter bits per image between 1 and 12.'); break; }
@@ -2469,13 +2591,21 @@ document.addEventListener('change', (e) => {
   if (t.id === 'prog-event-select') { ui.progress.eventId = t.value; ui.progress.formatId = null; ui.progress.limit = 20; render(); return; }
   if (t.id === 'board-event') { ui.boards.eventId = t.value; ui.boards.formatId = null; render(); return; }
   if (t.id === 'board-format') { ui.boards.formatId = t.value; render(); return; }
-  if (t.id === 'board-event2') { ui.boards[t.dataset.key] = t.value; render(); return; }
   if (t.id === 'me-rival') { act(async () => { await store.updateProfile({ rival_id: t.value || null }); await loadData(); toast(t.value ? `Rival set: ${initialsOf(t.value)}` : 'Rival cleared'); }); return; }
   if (t.id === 'me-board') { act(async () => { await store.updateProfile({ show_on_leaderboard: t.checked }); await loadData(); toast(t.checked ? 'You’re on the leaderboards' : 'Hidden from leaderboards'); }); return; }
   if (t.dataset.family) { act(async () => { await store.saveEms(t.dataset.family, t.value || null, null); await loadData(); toast('Saved'); }); return; }
   if (t.id === 'tg-event') { ui.admin.tgEvent = t.value; ui.admin.tgAthlete = $('#tg-ath').value; render(); return; }
   if (t.id === 'tg-ath') { ui.admin.tgAthlete = t.value; return; }
   if (t.id === 'fm-event') { ui.admin.fmEvent = t.value; render(); }
+});
+const ERR_KEY = { 'f-time-min': 'time', 'f-time-sec': 'time', 'f-correct': 'correct', 'f-total': 'correct', 'f-interval': 'interval', 'f-date': 'date', 'f-format': 'format' };
+document.addEventListener('input', (e) => {
+  const key = ERR_KEY[e.target.id];
+  if (key && ui.log && ui.log.errs && ui.log.errs[key]) {
+    delete ui.log.errs[key];
+    const m = document.getElementById('err-' + key); if (m) m.remove();
+    document.querySelectorAll('[aria-describedby="err-' + key + '"]').forEach((x) => { x.removeAttribute('aria-invalid'); x.classList.remove('invalid'); });
+  }
 });
 document.addEventListener('input', (e) => {
   if (e.target.id === 'f-time-min' || e.target.id === 'f-time-sec') { const r = $('#time-readout'); if (r) r.textContent = timeReadout($('#f-time-min').value, $('#f-time-sec').value); }
