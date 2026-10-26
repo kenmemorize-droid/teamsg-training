@@ -268,7 +268,7 @@ const CONFIG = {
 <script>
 'use strict';
 /* ---------------- Version (same in the demo and the live build) ---------------- */
-const APP_VERSION = '2026-10-24-cb8ac2';
+const APP_VERSION = '2026-10-26-23f855';
 /* ---------------- Utilities ---------------- */
 const TZ = 'Asia/Singapore';
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -2275,7 +2275,9 @@ function teamEventCounts(range) {
 }
 /* Columns: most trained discipline (team-wide attempts this month) on the left */
 function gridColumns(range) {
-  const counts = teamEventCounts(range);
+  // count only standard-format attempts, so 1 min practice doesn't reorder this grid
+  const counts = {};
+  for (const ev of state.events) { const test = gridAttemptTest(ev); for (const p of boardAthletes()) for (const a of attemptsOf(p.id)) if (a.event_id === ev.id && effortOk(a) && inRange(a.practiced_on, range) && test(a)) counts[ev.id] = (counts[ev.id] || 0) + 1; }
   return state.events.slice().sort((x, y) => (counts[y.id] || 0) - (counts[x.id] || 0) || x.sort_order - y.sort_order);
 }
 /* Which attempts count in a column: the discipline's standard format (Spoken: 1 s per digit or faster) */
@@ -2285,15 +2287,15 @@ function gridAttemptTest(ev) {
   return (a) => a.format_id === fid;
 }
 const gridLabel = (ev, v) => (ev.result_kind === 'time' ? fmtTime(v).replace(' s', 's') : trimNum(v, 1));
-function boardGridHTML() {
-  const range = periodRange('month'); const cols = gridColumns(range);
-  const me = state.me.id;
-  const athletes = boardAthletes().sort((x, y) => (y.id === me) - (x.id === me) || (x.initials || '').localeCompare(y.initials || ''));
-  const cell = {}; let any = false;
-  for (const ev of cols) {
-    const test = gridAttemptTest(ev); const kind = ev.result_kind; const results = [];
+/* 1 min format of an event (Binary, Speed Number, Images, Words) */
+const oneMinFormatId = (eid) => (formatsFor(eid).find((f) => f.is_standard && f.mem_seconds === 60) || {}).id;
+/* One grid: athletes × columns; each column is { ev, test, fmtId } */
+function gridTable(athletes, cols, range, label) {
+  const me = state.me.id; const cell = {}; let any = false;
+  for (const c of cols) {
+    const ev = c.ev; const kind = ev.result_kind; const results = [];
     for (const p of athletes) {
-      const list = attemptsOf(p.id).filter((a) => a.event_id === ev.id && perf(a) && test(a) && inRange(a.practiced_on, range) && metric(a) != null);
+      const list = attemptsOf(p.id).filter((a) => a.event_id === ev.id && perf(a) && c.test(a) && inRange(a.practiced_on, range) && metric(a) != null);
       const ok = bestAttempt(list.filter((a) => a.status !== 'pending_review'));
       const best = ok || bestAttempt(list.filter((a) => a.status === 'pending_review'));
       if (best) results.push({ p, v: metric(best), pending: !ok });
@@ -2304,21 +2306,40 @@ function boardGridHTML() {
     ranked.forEach((r, i) => { if (prev === null || r.v !== prev) { rank = i + 1; prev = r.v; } r.rank = rank; });
     for (const r of results) { cell[r.p.id + '|' + ev.id] = r; any = true; }
   }
-  if (!any) return `<div class="empty">No results this month yet. <a href="#/log">Log an attempt</a> to get on the board.</div>`;
-  const head = `<div class="grid-row"><div class="gl"></div>${cols.map((ev) => `<div class="ghead"><span aria-hidden="true">${DISCIPLINE_EMOJI[ev.id] || ''}</span><span>${esc(GRID_SHORT[ev.id] || ev.name)}</span></div>`).join('')}</div>`;
+  if (!any) return { any, html: '' };
+  const head = `<div class="grid-row"><div class="gl"></div>${cols.map((c) => `<div class="ghead"><span aria-hidden="true">${DISCIPLINE_EMOJI[c.ev.id] || ''}</span><span>${esc(GRID_SHORT[c.ev.id] || c.ev.name)}</span></div>`).join('')}</div>`;
   const rows = athletes.map((p) => {
     const isMe = p.id === me;
-    const cells = cols.map((ev) => {
-      const r = cell[p.id + '|' + ev.id];
-      if (!r) return `<div class="gcell empty" role="text" aria-label="${esc(p.initials)}, ${esc(ev.name)}: no result this month">–</div>`;
+    const cells = cols.map((c) => {
+      const ev = c.ev; const r = cell[p.id + '|' + ev.id];
+      if (!r) return `<div class="gcell empty" role="text" aria-label="${esc(p.initials)}, ${esc(ev.name)}${label ? ' ' + label : ''}: no result this month">–</div>`;
       const medal = !r.pending && r.rank <= 3 ? r.rank : 0;
-      const label = `${p.initials}, ${ev.name}: ${gridLabel(ev, r.v)}${medal ? ', ' + MEDAL_NAME[medal] : ''}${r.pending ? ', waiting for verification' : ''}. Opens progress.`;
-      return `<button type="button" class="gcell${medal ? ' m' + medal : ''}${r.pending ? ' pending' : ''}" data-act="grid-open" data-ath="${esc(p.id)}" data-ev="${esc(ev.id)}" aria-label="${esc(label)}">${esc(gridLabel(ev, r.v))}</button>`;
+      const aria = `${p.initials}, ${ev.name}${label ? ' ' + label : ''}: ${gridLabel(ev, r.v)}${medal ? ', ' + MEDAL_NAME[medal] : ''}${r.pending ? ', waiting for verification' : ''}. Opens progress.`;
+      return `<button type="button" class="gcell${medal ? ' m' + medal : ''}${r.pending ? ' pending' : ''}" data-act="grid-open" data-ath="${esc(p.id)}" data-ev="${esc(ev.id)}" data-fmt="${esc(c.fmtId || '')}" aria-label="${esc(aria)}">${esc(gridLabel(ev, r.v))}</button>`;
     }).join('');
     return `<div class="grid-row${isMe ? ' me' : ''}"><div class="gl"><a class="avatar sm" href="#/profile/${esc(p.id)}" aria-label="${esc(p.display_name || p.initials)}${isMe ? ' (you)' : ''}, profile">${esc(p.initials)}</a></div>${cells}</div>`;
   }).join('');
-  return `<p class="tiny muted" style="margin:0 0 8px">Best this month in each discipline’s standard format. Swipe sideways for more.</p>
-    <div class="grid-scroll" tabindex="0" role="region" aria-label="Best results this month, scrolls sideways"><div class="grid-inner" style="min-width:${46 + 4 + cols.length * 68}px;--cols:${cols.length}">${head}${rows}</div></div>
+  return { any, html: `<div class="grid-scroll" tabindex="0" role="region" aria-label="${esc(label ? 'Best ' + label + ' results this month' : 'Best results this month, scrolls sideways')}"><div class="grid-inner" style="min-width:${46 + 4 + cols.length * 68}px;--cols:${cols.length}">${head}${rows}</div></div>` };
+}
+function boardGridHTML() {
+  const range = periodRange('month'); const me = state.me.id;
+  const athletes = boardAthletes().sort((x, y) => (y.id === me) - (x.id === me) || (x.initials || '').localeCompare(y.initials || ''));
+  // Standard formats: most trained discipline (team-wide attempts this month) on the left
+  const main = gridTable(athletes, gridColumns(range).map((ev) => ({ ev, test: gridAttemptTest(ev), fmtId: defaultFormatFor(ev.id) })), range, '');
+  // 1 min: Binary, Speed Number, Images, Words, ordered by team-wide 1 min attempts this month
+  const oneMinCount = {};
+  for (const p of boardAthletes()) for (const a of attemptsOf(p.id)) if (effortOk(a) && inRange(a.practiced_on, range) && a.format_id === oneMinFormatId(a.event_id)) oneMinCount[a.event_id] = (oneMinCount[a.event_id] || 0) + 1;
+  const oneCols = state.events.filter((e) => XP_ONE_MIN_EVENTS.includes(e.id) && oneMinFormatId(e.id))
+    .sort((x, y) => (oneMinCount[y.id] || 0) - (oneMinCount[x.id] || 0) || x.sort_order - y.sort_order)
+    .map((ev) => { const fid = oneMinFormatId(ev.id); return { ev, fmtId: fid, test: (a) => a.format_id === fid }; });
+  const one = oneCols.length ? gridTable(athletes, oneCols, range, '1 min') : { any: false, html: '' };
+  if (!main.any && !one.any) return `<div class="empty">No results this month yet. <a href="#/log">Log an attempt</a> to get on the board.</div>`;
+  return `<h2 style="font-size:17px;margin:0 0 2px">Standard formats</h2>
+    <p class="tiny muted" style="margin:0 0 8px">Best this month in each discipline’s standard format. Swipe sideways for more.</p>
+    ${main.any ? main.html : '<div class="empty" style="padding:16px 0">No standard-format results this month yet.</div>'}
+    <h2 style="font-size:17px;margin:22px 0 2px">1 min</h2>
+    <p class="tiny muted" style="margin:0 0 8px">Best this month in the 1 min format.</p>
+    ${one.any ? one.html : '<div class="empty" style="padding:16px 0">No 1 min results this month yet.</div>'}
     <div class="grid-key"><span><i class="m1"></i>1st</span><span><i class="m2"></i>2nd</span><span><i class="m3"></i>3rd</span></div>`;
 }
 
@@ -2592,7 +2613,7 @@ document.addEventListener('click', (e) => {
       ui.progress.calMonth = d.toISOString().slice(0, 7); render(); break;
     }
     case 'board-period': ui.boards.period = el.dataset.p; render(); break;
-    case 'grid-open': { const evId = el.dataset.ev; ui.progress.athleteId = el.dataset.ath; ui.progress.eventId = evId; ui.progress.formatId = defaultFormatFor(evId); ui.progress.limit = 20; navigate('#/progress'); break; }
+    case 'grid-open': { const evId = el.dataset.ev; ui.progress.athleteId = el.dataset.ath; ui.progress.eventId = evId; ui.progress.formatId = el.dataset.fmt || defaultFormatFor(evId); ui.progress.limit = 20; navigate('#/progress'); break; }
     case 'ems-binary-save': {
       const v = $('#ems-binary').value.trim(); const n = parseInt(v, 10);
       if (v && !(n >= 1 && n <= 12)) { toast('Enter bits per image between 1 and 12.'); break; }
