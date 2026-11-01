@@ -268,7 +268,7 @@ const CONFIG = {
 <script>
 'use strict';
 /* ---------------- Version (same in the demo and the live build) ---------------- */
-const APP_VERSION = '2026-10-26-23f855';
+const APP_VERSION = '2026-11-01-5cd3cf';
 /* ---------------- Utilities ---------------- */
 const TZ = 'Asia/Singapore';
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -3115,13 +3115,14 @@ function notesSection(athleteId, attemptId) {
   </section>`;
 }
 
+const badgeCount = (n) => `${n} badge${n === 1 ? '' : 's'}`;
 function defaultRecapMonth() { const t = TODAY(); return +t.slice(8, 10) <= 7 ? shiftMonth(t.slice(0, 7), -1) : t.slice(0, 7); }
 function recapText(r) {
   const parts = [`Team SG training, ${monthName(r.month)}: ${r.attempts} attempts on ${r.days} days`, `${r.pbs} personal best${r.pbs === 1 ? '' : 's'}`, `${r.targets} target${r.targets === 1 ? '' : 's'} hit`];
   if (r.best) parts.push(`best event ${r.best.name} (${r.best.text})`);
   if (r.improved) parts.push(`most improved ${r.improved.name} (${r.improved.text})`);
   if (r.fixed) parts.push(`${r.fixed} trouble item${r.fixed > 1 ? 's' : ''} fixed`);
-  if (r.badges.length) parts.push(`badges: ${r.badges.join(', ')}`);
+  if (r.badges.length) parts.push(badgeCount(r.badges.length));
   return parts.join(', ') + '.';
 }
 function viewRecap() {
@@ -3140,7 +3141,7 @@ function viewRecap() {
       ${line('Best event', r.best ? `${esc(r.best.name)} <span class="muted" style="font-weight:400">· ${esc(r.best.text)}</span>` : '–')}
       ${line('Most improved', r.improved ? `${esc(r.improved.name)} <span class="muted" style="font-weight:400">· ${esc(r.improved.text)}</span>` : '–')}
       ${r.fixed != null ? line('Trouble items fixed', `${r.fixed} <span class="muted" style="font-weight:400">· missed twice or more in the 60 days before, not this month</span>`) : ''}
-      ${line('Badges earned', r.badges.length ? esc(r.badges.join(', ')) : '–')}
+      ${line('Badges earned', r.badges.length ? `<a href="#/profile" aria-label="${badgeCount(r.badges.length)} earned, see them in your profile">${badgeCount(r.badges.length)}</a>` : '–')}
       ${line('Events trained', r.events)}
     </section>
     ${r.attempts ? `<div class="section stack"><button type="button" class="btn primary big" data-act="recap-image" data-m="${month}">Create share image</button><button type="button" class="btn" data-act="recap-copy" data-m="${month}">Copy summary text</button></div>` : '<div class="section"><div class="empty">No attempts this month.</div></div>'}
@@ -3164,7 +3165,7 @@ async function recapCanvas(r) {
   });
   const lines = [['Best event', r.best ? `${r.best.name} · ${r.best.text}` : '–'], ['Most improved', r.improved ? `${r.improved.name} · ${r.improved.text}` : '–']];
   if (r.fixed) lines.push(['Trouble items fixed', String(r.fixed)]);
-  if (r.badges.length) lines.push(['Badges', r.badges.join(', ')]);
+  if (r.badges.length) lines.push(['Badges earned', badgeCount(r.badges.length)]);
   lines.slice(0, 4).forEach(([l, v], i) => {
     const y = 1000 + i * 82;
     g.fillStyle = '#C9D1DC'; g.font = `600 30px ${BODY}`; g.fillText(l, 80, y);
